@@ -674,9 +674,9 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
 }
 
 extensionStorage.sync.get({ targetUrl: '', targetTab: '', statusText: '', aDateValue: '', personnelId: '', [legacyPersonnelKey]: '', groupTab: '' }).then(async values => {
-  const groupTab = /教会|église/i.test(values.groupTab || '') ? '' : (values.groupTab || '');
+  const groupTab = values.groupTab || '';
   const personnelId = values.personnelId || values[legacyPersonnelKey] || '';
-  if (groupTab !== values.groupTab || (personnelId && !values.personnelId)) await extensionStorage.sync.set({ groupTab, personnelId });
+  if (personnelId && !values.personnelId) await extensionStorage.sync.set({ personnelId });
   $('#targetUrl').value = values.targetUrl; $('#targetTab').value = values.targetTab; $('#statusText').value = values.statusText; $('#aDateValue').value = values.aDateValue; $('#personnelId').value = personnelId; $('#groupTab').value = groupTab;
 });
 extensionStorage.local.get({ groqApiKey: '', geminiApiKey: '', llmProvider: 'groq', regionTab: '', regionConfigCache: null, googleApiConnectedAt: 0 }).then(values => {
