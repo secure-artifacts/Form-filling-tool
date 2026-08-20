@@ -163,9 +163,13 @@ async function saveHandoffHistory(results) {
 const findHandoffMatch = (value, rows, columnIndex) => {
   const wanted = normalize(value);
   if (!wanted) return null;
-  return rows.find(row => normalize(row[columnIndex]) === wanted)
-    || rows.find(row => normalize(row[columnIndex]).includes(wanted) || wanted.includes(normalize(row[columnIndex])))
-    || null;
+  const exact = rows.filter(row => normalize(row[columnIndex]) === wanted);
+  const fuzzy = rows.filter(row => {
+    const candidate = normalize(row[columnIndex]);
+    return candidate && candidate !== wanted && (candidate.includes(wanted) || wanted.includes(candidate));
+  });
+  const withLinks = row => row[7] || row[8];
+  return exact.find(withLinks) || exact[0] || fuzzy.find(withLinks) || fuzzy[0] || null;
 };
 const handoffIdentity = item => {
   const phone = String(item.phoneUrl || '').replace(/\D/g, '');
