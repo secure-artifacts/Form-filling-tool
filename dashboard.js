@@ -162,11 +162,14 @@ async function saveHandoffHistory(results) {
 }
 const findHandoffMatch = (value, rows, columnIndex) => {
   const wanted = normalize(value);
+  const wantedCountryTokens = columnIndex === 0 ? wanted.split(' ').filter(token => /^[a-z]{3,}$/.test(token)) : [];
   if (!wanted) return null;
   const exact = rows.filter(row => normalize(row[columnIndex]) === wanted);
   const fuzzy = rows.filter(row => {
     const candidate = normalize(row[columnIndex]);
-    return candidate && candidate !== wanted && (candidate.includes(wanted) || wanted.includes(candidate));
+    const candidateCountryTokens = columnIndex === 0 ? candidate.split(' ').filter(token => /^[a-z]{3,}$/.test(token)) : [];
+    const countryMatch = columnIndex === 0 && wantedCountryTokens.some(token => candidateCountryTokens.includes(token));
+    return candidate && candidate !== wanted && (candidate.includes(wanted) || wanted.includes(candidate) || countryMatch);
   });
   const withLinks = row => row[7] || row[8];
   return exact.find(withLinks) || exact[0] || fuzzy.find(withLinks) || fuzzy[0] || null;
