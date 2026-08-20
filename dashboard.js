@@ -603,7 +603,9 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
   const hasData = row => row?.some(value => value !== '' && value !== null && value !== undefined);
   const values = parseTsv(text).map(row => row.map(value => {
     const trimmed = typeof value === 'string' ? value.trim() : value;
-    return typeof trimmed === 'string' && /^'\d{4}-\d{1,2}-\d{1,2}$/.test(trimmed) ? trimmed.slice(1) : value;
+    const quotedNumber = typeof trimmed === 'string' && /^'\s*[+-]?\d+(?:[.,]\d+)?$/.test(trimmed);
+    const quotedDate = typeof trimmed === 'string' && /^'\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(trimmed);
+    return quotedNumber || quotedDate ? trimmed.slice(1).trim() : value;
   }));
   const nonEmptyCells = values.reduce((total, row) => total + row.filter(value => value !== '').length, 0);
   if (!nonEmptyCells) throw new Error('源选区没有读到 B:BL 内容，请确认选择整行后按 Ctrl+C。');
