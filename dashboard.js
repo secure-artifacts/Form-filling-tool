@@ -601,7 +601,10 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
   const current = await sheetsRequest(token, `${base}/values/${range}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE`);
   const rows = current.values || [];
   const hasData = row => row?.some(value => value !== '' && value !== null && value !== undefined);
-  const values = parseTsv(text);
+  const values = parseTsv(text).map(row => row.map(value => {
+    const trimmed = typeof value === 'string' ? value.trim() : value;
+    return typeof trimmed === 'string' && /^'\d{4}-\d{1,2}-\d{1,2}$/.test(trimmed) ? trimmed.slice(1) : value;
+  }));
   const nonEmptyCells = values.reduce((total, row) => total + row.filter(value => value !== '').length, 0);
   if (!nonEmptyCells) throw new Error('源选区没有读到 B:BL 内容，请确认选择整行后按 Ctrl+C。');
   log(`源选区解析为 ${values.length} 行、${nonEmptyCells} 个非空单元格。`);
@@ -652,7 +655,7 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
   const dateValue = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   const dateCRange = encodeURIComponent(`${sheet}!C${startRow}:C${endRow}`);
   setStep(6, 6);
-  await sheetsRequest(token, `${base}/values/${dateCRange}?valueInputOption=RAW`, {
+  await sheetsRequest(token, `${base}/values/${dateCRange}?valueInputOption=USER_ENTERED`, {
     method: 'PUT',
     body: JSON.stringify({ range: `${sheet}!C${startRow}:C${endRow}`, majorDimension: 'ROWS', values: values.map(() => [dateValue]) })
   });
