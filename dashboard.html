@@ -31,8 +31,8 @@
           <label>群组配置分表<input id="groupTab" placeholder="请输入群组配置分表名称"></label>
           <p id="regionCacheStatus" class="status">授权后自动读取，之后每天 12:00 检查</p>
           <label>拆解模型<select id="llmProvider"><option value="groq">Groq</option><option value="gemini">Gemini</option></select></label>
-          <label id="llmKeyLabel">Groq API Key<input id="llmKey" type="password" placeholder="gsk_..."></label>
-          <p class="tip">API Key 只保存在本机扩展存储中，仅用于拆解 AL 列报告。</p>
+          <label id="llmKeyLabel">Groq API Keys（每行一个）<textarea id="llmKey" rows="4" spellcheck="false" autocomplete="off" placeholder="gsk_...&#10;gsk_..."></textarea></label>
+          <p class="tip">Groq 可填写多个 Key，每行一个；遇到限流会自动轮询。Key 只保存在本机扩展存储中。</p>
         </fieldset>
         <button id="save" class="secondary">保存配置</button>
         <p id="saveStatus" class="status"></p>

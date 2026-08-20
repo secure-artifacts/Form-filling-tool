@@ -299,7 +299,7 @@ const showRegionCacheStatus = (message, color = '#188038') => { const node = $('
 const cacheTime = timestamp => timestamp ? new Date(timestamp).toLocaleString() : '未知时间';
 const updateLlmKeyLabel = () => {
   const gemini = $('#llmProvider').value === 'gemini';
-  $('#llmKeyLabel').firstChild.nodeValue = gemini ? 'Gemini API Key' : 'Groq API Key';
+  $('#llmKeyLabel').firstChild.nodeValue = gemini ? 'Gemini API Key' : 'Groq API Keys（每行一个）';
   $('#llmKey').placeholder = gemini ? 'AQ... 或 AIza...' : 'gsk_...';
 };
 $('#llmProvider').onchange = async () => {
@@ -454,10 +454,28 @@ async function callGroq(apiKey, report) {
       ]
     })
   });
-  if (!response.ok) throw new Error(`Groq API ${response.status}: ${(await response.text()).slice(0, 180)}`);
+  if (!response.ok) { const error = new Error(`Groq API ${response.status}: ${(await response.text()).slice(0, 180)}`); error.status = response.status; throw error; }
   const data = await response.json();
   const message = data.choices?.[0]?.message || {};
   return parseModelJson(message.content || message.reasoning || data.choices?.[0]?.text || '', 'Groq');
+}
+
+let groqKeyIndex = 0;
+async function callGroqWithRotation(apiKeys, report) {
+  let lastError;
+  for (let offset = 0; offset < apiKeys.length; offset++) {
+    const index = (groqKeyIndex + offset) % apiKeys.length;
+    try {
+      const result = await callGroq(apiKeys[index], report);
+      groqKeyIndex = (index + 1) % apiKeys.length;
+      return result;
+    } catch (error) {
+      lastError = error;
+      if (![401, 403, 429].includes(error.status)) throw error;
+      log(`Groq Key ${index + 1}/${apiKeys.length} 暂不可用（HTTP ${error.status}），切换下一个 Key。`, 'error');
+    }
+  }
+  throw lastError || new Error('没有可用的 Groq API Key。');
 }
 
 async function callGemini(apiKey, report) {
@@ -476,7 +494,7 @@ async function callGemini(apiKey, report) {
   return parseModelJson(content, 'Gemini');
 }
 
-const callLlm = (provider, apiKey, report) => provider === 'gemini' ? callGemini(apiKey, report) : callGroq(apiKey, report);
+const callLlm = (provider, apiKeys, report) => provider === 'gemini' ? callGemini(apiKeys[0], report) : callGroqWithRotation(apiKeys, report);
 
 $('#workflowTab').onclick = () => { $('#workflowTab').classList.add('active'); $('#reportTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#workflowView').hidden = false; $('#reportView').hidden = true; $('#configView').hidden = true; };
 $('#reportTab').onclick = () => { $('#reportTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#workflowView').hidden = true; $('#reportView').hidden = false; $('#configView').hidden = true; };
@@ -682,8 +700,9 @@ extensionStorage.sync.get({ targetUrl: '', targetTab: '', statusText: '', aDateV
   const personnelId = values.personnelId || '';
   $('#targetUrl').value = values.targetUrl; $('#targetTab').value = values.targetTab; $('#statusText').value = values.statusText; $('#aDateValue').value = values.aDateValue; $('#personnelId').value = personnelId; $('#groupTab').value = groupTab;
 });
-extensionStorage.local.get({ groqApiKey: '', geminiApiKey: '', llmProvider: 'groq', regionTab: '', regionConfigCache: null, googleApiConnectedAt: 0 }).then(values => {
-  $('#llmProvider').value = values.llmProvider; $('#llmKey').value = values.llmProvider === 'gemini' ? values.geminiApiKey : values.groqApiKey; $('#regionTab').value = values.regionTab;
+extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', regionTab: '', regionConfigCache: null, googleApiConnectedAt: 0 }).then(values => {
+  const groqApiKeys = values.groqApiKeys?.length ? values.groqApiKeys : (values.groqApiKey ? [values.groqApiKey] : []);
+  $('#llmProvider').value = values.llmProvider; $('#llmKey').value = values.llmProvider === 'gemini' ? values.geminiApiKey : groqApiKeys.join('\n'); $('#regionTab').value = values.regionTab;
   if (values.googleApiConnectedAt) {
     $('#connectionDot').parentElement.classList.add('ok');
     $('#connectionText').textContent = `Google API 已授权（${cacheTime(values.googleApiConnectedAt)}）`;
@@ -733,15 +752,16 @@ $('#save').onclick = async () => {
   if (!statusText) { $('#saveStatus').textContent = '请填写 E 列状态'; $('#saveStatus').style.color = '#c5221f'; return; }
   if (!aDateValue) { $('#saveStatus').textContent = '请选择 A 列日期/时间'; $('#saveStatus').style.color = '#c5221f'; return; }
   await extensionStorage.sync.set({ targetUrl, targetTab, statusText, aDateValue, personnelId, groupTab });
-  const llmProvider = $('#llmProvider').value; const llmKey = $('#llmKey').value.trim();
+  const llmProvider = $('#llmProvider').value; const llmKeys = $('#llmKey').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   const regionTab = $('#regionTab').value.trim();
   if (!regionTab) { $('#saveStatus').textContent = '请填写地区配置分表名称'; $('#saveStatus').style.color = '#c5221f'; return; }
-  await extensionStorage.local.set({ [llmProvider === 'gemini' ? 'geminiApiKey' : 'groqApiKey']: llmKey, llmProvider, regionTab });
+  if (!llmKeys.length) { $('#saveStatus').textContent = '请填写 API Key'; $('#saveStatus').style.color = '#c5221f'; return; }
+  await extensionStorage.local.set({ groqApiKey: llmProvider === 'groq' ? llmKeys[0] : '', groqApiKeys: llmProvider === 'groq' ? llmKeys : [], geminiApiKey: llmProvider === 'gemini' ? llmKeys[0] : '', llmProvider, regionTab });
   $('#saveStatus').textContent = '配置已保存'; $('#saveStatus').style.color = '#188038'; log(`目标位置已保存：${targetTab || '默认分表'}`, 'success');
 };
 
 const syncConfigKeys = ['targetUrl', 'targetTab', 'statusText', 'aDateValue', 'personnelId', 'groupTab'];
-const localConfigKeys = ['groqApiKey', 'geminiApiKey', 'llmProvider', 'regionTab', 'reportLabels'];
+const localConfigKeys = ['groqApiKey', 'groqApiKeys', 'geminiApiKey', 'llmProvider', 'regionTab', 'reportLabels'];
 $('#exportConfig').onclick = async () => {
   const syncValues = await extensionStorage.sync.get(syncConfigKeys);
   const localValues = await extensionStorage.local.get(localConfigKeys);
@@ -814,9 +834,9 @@ $('#start').onclick = async () => {
       token = await getGoogleToken(true);
       result = await transferWithSheetsApi(text, token, $('#targetUrl').value.trim(), $('#targetTab').value.trim(), $('#statusText').value.trim(), $('#aDateValue').value, $('#personnelId').value.trim());
     }
-    const { groqApiKey, geminiApiKey, llmProvider = 'groq', regionTab = '' } = await extensionStorage.local.get({ groqApiKey: '', geminiApiKey: '', llmProvider: 'groq', regionTab: '' });
-    const llmKey = llmProvider === 'gemini' ? geminiApiKey : groqApiKey;
-    if (!llmKey) throw new Error(`尚未配置 ${llmProvider === 'gemini' ? 'Gemini' : 'Groq'} API Key，请在右侧配置后重试。`);
+    const { groqApiKey, groqApiKeys = [], geminiApiKey, llmProvider = 'groq', regionTab = '' } = await extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', regionTab: '' });
+    const llmKeys = llmProvider === 'gemini' ? [geminiApiKey].filter(Boolean) : (groqApiKeys.length ? groqApiKeys : [groqApiKey].filter(Boolean));
+    if (!llmKeys.length) throw new Error(`尚未配置 ${llmProvider === 'gemini' ? 'Gemini' : 'Groq'} API Key，请在右侧配置后重试。`);
     const apiBase = `https://sheets.googleapis.com/v4/spreadsheets/${parseSpreadsheetId($('#targetUrl').value.trim())}`;
     setStep(8, 8); log(`正在同步地区配置分表“${regionTab}”（每天最多检查一次）。`);
     const regionRows = await syncRegionConfig(token, apiBase, regionTab);
@@ -825,7 +845,7 @@ $('#start').onclick = async () => {
     const phoneFilled = await fillPhoneCountries(token, apiBase, $('#targetTab').value.trim() || 'Sheet1', regionRows, result.startRow, result.rowCount);
     log(`Q 列区号处理完成，补全 V 列 ${phoneFilled} 个空单元格。`, 'success');
     setStep(10, 10); log(`正在逐行调用 ${llmProvider === 'gemini' ? 'Gemini' : 'Groq'} 拆解 AL${result.startRow}:AL${result.startRow + result.rowCount - 1}。`);
-    const analysis = await analyzeReports(token, apiBase, $('#targetTab').value.trim() || 'Sheet1', regionRows, llmProvider, llmKey, result.startRow, result.rowCount);
+    const analysis = await analyzeReports(token, apiBase, $('#targetTab').value.trim() || 'Sheet1', regionRows, llmProvider, llmKeys, result.startRow, result.rowCount);
     setStep(11, 11); log(`报告拆解完成：分析 ${analysis.analyzed} 行，回写 ${analysis.updated} 个字段。`, 'success');
     setStep(12, 12); log('正在生成交接报告：按 Y→X→W 查找地区划分。');
     const handoffResults = await buildHandoffReport(token, apiBase, $('#targetTab').value.trim() || 'Sheet1', $('#groupTab').value.trim(), result.startRow, result.rowCount);
