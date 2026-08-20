@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>表格转交设置</title>
+<style>
+  html, body { width: 520px; min-height: 360px; }
+  body { box-sizing: border-box; margin: 0; padding: 24px; font: 15px Arial; color: #202124; }
+  h2 { margin: 0 0 14px; font-size: 22px; }
+  label { display: block; margin: 18px 0 6px; }
+  input { box-sizing: border-box; width: 100%; padding: 9px; }
+  button { margin-top: 22px; padding: 9px 18px; cursor: pointer; }
+  #status { margin-left: 12px; color: #188038; }
+  .tip { color: #5f6368; line-height: 1.6; }
+</style>
+<h2>表格转交设置</h2>
+<p class="tip">先在这里填写目标表格。以后在 A 表中选中要转交的行（建议只选 B 到 BL），按 Ctrl+C，再右键点击“转交表格”。目标表格必须是当前 Google 账号有权限编辑的表格。</p>
+<label for="targetUrl">目标表格网址</label>
+<input id="targetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit">
+<label for="targetTab">目标分表名称（可选）</label>
+<input id="targetTab" placeholder="例如：2026年6月">
+<button id="save">保存目标位置</button><span id="status"></span>
+<script src="options.js"></script>

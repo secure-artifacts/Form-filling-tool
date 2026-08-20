@@ -1,0 +1,31 @@
+# Secrets and local credentials
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+token.json
+tokens.json
+client_secret*.json
+service-account*.json
+*.pem
+*.key
+*.p12
+
+# Exported configuration files may contain Groq/Gemini API Keys
+form-filling-config-*.json
+*-config-*.json
+
+# Local caches and generated data
+storage/
+cache/
+dist/
+build/
+node_modules/
+*.log
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

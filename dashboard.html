@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>表格自动化控制台</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <header class="topbar">
+    <div><div class="eyebrow">FORM AUTOMATION</div><h1>表格自动化控制台</h1></div>
+    <div class="connection"><i id="connectionDot"></i><span id="connectionText">尚未验证 Google API</span><button id="authorize" class="secondary">授权 Google</button></div>
+  </header>
+  <main class="layout">
+    <section class="main-col">
+      <div class="hero card"><div><p class="eyebrow">当前流程</p><h2>转交表格</h2><p id="heroText">等待从 Google 表格接收选区数据。</p></div><button id="start" class="primary">开始转交</button></div>
+      <nav class="view-tabs" aria-label="控制台页面"><button id="workflowTab" class="view-tab active">流程控制</button><button id="reportTab" class="view-tab">交接报告 <span id="reportCount">0</span></button><button id="configTab" class="view-tab">参数配置</button></nav>
+      <div id="workflowView"><div class="card"><div class="section-title"><h3>流程进度</h3><span id="progressText">0 / 13</span></div><div class="phases" id="phases"></div></div>
+      <div class="card"><div class="section-title"><h3>执行日志</h3><button id="clearLog" class="link">清空</button></div><div class="logs" id="logs"></div></div></div>
+      <div id="reportView" class="card report-view" hidden><div class="section-title"><div><h3>交接报告结果</h3><p class="report-subtitle">根据 Y → X → W 查找地区划分信息</p></div><div class="report-tools"><label>按日期查看<select id="reportDateFilter"><option value="">本次结果</option></select></label><span id="reportStatus" class="badge">尚未生成</span><button id="copyAllReports" class="secondary">复制全部</button></div></div><div id="reportResults" class="report-results"><div class="empty-report">流程完成后，这里会显示交接报告。</div></div></div>
+      <div id="configView" class="config-view" hidden><div class="card"><div class="section-title"><h3>参数配置</h3><span class="badge">本机保存</span></div>
+        <fieldset class="config-group target-config"><legend>转交目标</legend>
+          <label>目标表格网址<input id="targetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit"></label>
+          <label>目标分表名称<input id="targetTab" placeholder="例如：2026年6月"></label>
+          <label>A列日期<select id="aDateValue"><option value="">请选择 A 列日期/时间</option><option value="1 p.m.">1 p.m.</option><option value="6 p.m.">6 p.m.</option><option value="8 p.m.">8 p.m.</option><option value="9:30 p.m.">9:30 p.m.</option></select></label>
+          <label>E列状态<input id="statusText" placeholder="请输入要写入 E 列的状态"></label>
+          <label>人员 ID<input id="personnelId" placeholder="输入人员 ID，将写入 I 列"></label>
+        </fieldset>
+        <fieldset class="config-group smart-config"><legend>智能补全</legend>
+          <label>地区配置分表<input id="regionTab" placeholder="请输入地区配置分表名称"></label>
+          <label>群组配置分表<input id="groupTab" placeholder="请输入群组配置分表名称"></label>
+          <p id="regionCacheStatus" class="status">授权后自动读取，之后每天 12:00 检查</p>
+          <label>拆解模型<select id="llmProvider"><option value="groq">Groq</option><option value="gemini">Gemini</option></select></label>
+          <label id="llmKeyLabel">Groq API Key<input id="llmKey" type="password" placeholder="gsk_..."></label>
+          <p class="tip">API Key 只保存在本机扩展存储中，仅用于拆解 AL 列报告。</p>
+        </fieldset>
+        <button id="save" class="secondary">保存配置</button>
+        <p id="saveStatus" class="status"></p>
+        <div class="config-backup"><button id="exportConfig" class="secondary">导出配置</button><button id="importConfig" class="secondary">导入配置</button><button id="clearConfig" class="danger-button">清除所有配置</button><input id="configFile" type="file" accept="application/json,.json" hidden><p>导出文件包含 API Key，请妥善保存，不要上传到公开仓库。</p></div>
+      </div></div>
+    </section>
+  </main>
+  <script src="dashboard.js"></script>
+</body>
+</html>
