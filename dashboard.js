@@ -16,7 +16,6 @@ let state = { active: -1, done: 0 };
 const COLUMN_COUNT = 63; // B through BL, inclusive.
 const GOOGLE_CLIENT_ID = '357885944577-8agplpmrpruj17lihal2eaatfr0hfhu3.apps.googleusercontent.com';
 const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
-const legacyPersonnelKey = ['gospel', 'Worker', 'Id'].join('');
 let webAccessToken = '';
 
 function renderSteps() {
@@ -673,10 +672,9 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
   return { startRow, rowCount: values.length };
 }
 
-extensionStorage.sync.get({ targetUrl: '', targetTab: '', statusText: '', aDateValue: '', personnelId: '', [legacyPersonnelKey]: '', groupTab: '' }).then(async values => {
+extensionStorage.sync.get({ targetUrl: '', targetTab: '', statusText: '', aDateValue: '', personnelId: '', groupTab: '' }).then(async values => {
   const groupTab = values.groupTab || '';
-  const personnelId = values.personnelId || values[legacyPersonnelKey] || '';
-  if (personnelId && !values.personnelId) await extensionStorage.sync.set({ personnelId });
+  const personnelId = values.personnelId || '';
   $('#targetUrl').value = values.targetUrl; $('#targetTab').value = values.targetTab; $('#statusText').value = values.statusText; $('#aDateValue').value = values.aDateValue; $('#personnelId').value = personnelId; $('#groupTab').value = groupTab;
 });
 extensionStorage.local.get({ groqApiKey: '', geminiApiKey: '', llmProvider: 'groq', regionTab: '', regionConfigCache: null, googleApiConnectedAt: 0 }).then(values => {
@@ -763,7 +761,7 @@ $('#configFile').onchange = async event => {
 };
 $('#clearConfig').onclick = async () => {
   if (!window.confirm('确定清除所有配置、API Key、报告历史和本地缓存吗？此操作不可撤销。')) return;
-  await extensionStorage.sync.remove([...syncConfigKeys, legacyPersonnelKey]);
+  await extensionStorage.sync.remove(syncConfigKeys);
   await extensionStorage.local.remove([...localConfigKeys, 'handoffHistory', 'regionConfigCache', 'regionConfigLastCheckedAt', 'regionConfigLastCheckRows', 'googleApiConnectedAt']);
   if (extensionStorage.session) await extensionStorage.session.remove('webAccessToken');
   window.alert('配置已清除，页面将重新加载。'); location.reload();
