@@ -15,6 +15,7 @@ service-account*.json
 # Exported configuration files may contain Groq/Gemini API Keys
 form-filling-config-*.json
 *-config-*.json
+*.zip
 
 # Local caches and generated data
 storage/
