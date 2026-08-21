@@ -135,6 +135,7 @@ const defaultReportLabels = { brebis: '人员', numero: '号码', reportGroup: '
 let reportLabels = { ...defaultReportLabels };
 const reportLabelKeys = ['brebis', 'numero', 'reportGroup', 'callGroup'];
 const copyIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8.5A2.5 2.5 0 0 1 10.5 6h7A2.5 2.5 0 0 1 20 8.5v7a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 8 15.5v-7Z"/><path d="M16 6V5.5A2.5 2.5 0 0 0 13.5 3h-7A2.5 2.5 0 0 0 4 5.5v7A2.5 2.5 0 0 0 6.5 15H8"/></svg>';
+const refreshIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.7-4L4 9"/><path d="M4 4v5h5"/><path d="M4 13a8 8 0 0 0 14.7 4L20 15"/><path d="M20 20v-5h-5"/></svg>';
 extensionStorage.local.get({ reportLabels: defaultReportLabels }).then(({ reportLabels: saved }) => {
   reportLabels = { ...defaultReportLabels, ...(saved || {}) };
   if (displayedHandoffResults.length) renderHandoffResults(displayedHandoffResults, false);
@@ -185,7 +186,7 @@ function renderHandoffResults(results, isCurrent = true) {
   $('#reportCount').textContent = results.length;
   $('#reportStatus').textContent = `${results.length} 行`;
   $('#reportResults').innerHTML = results.length
-    ? `<div class="report-row header"><div>行</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="brebis" title="点击修改名称">${escapeHtml(reportLabels.brebis)}</span>（P列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="numero" title="点击修改名称">${escapeHtml(reportLabels.numero)}</span>（Q列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="reportGroup" title="点击修改名称">${escapeHtml(reportLabels.reportGroup)}</span>（H列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="callGroup" title="点击修改名称">${escapeHtml(reportLabels.callGroup)}</span>（I列）</div><div>匹配来源</div><div>操作</div></div>` + results.map((item, index) => `<div class="report-row ${item.source ? '' : 'unmatched'}"><div class="report-cell">${escapeHtml(item.row)}</div><div class="report-cell">${escapeHtml(item.brebis || '—')}</div><div class="report-cell">${item.phoneUrl ? `<a href="${escapeHtml(item.phoneUrl)}" target="_blank" rel="noopener">打开 WhatsApp</a>` : '—'}</div><div class="report-cell">${escapeHtml(item.reportGroup || '—')}</div><div class="report-cell">${escapeHtml(item.callGroup || '—')}</div><div class="report-cell match-source">${escapeHtml(item.source || '未匹配')}</div><div class="report-cell"><button class="copy-report icon-button secondary" data-report-index="${index}" aria-label="复制本条" title="复制本条">${copyIcon}</button></div></div>`).join('')
+    ? `<div class="report-row header"><div>行</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="brebis" title="点击修改名称">${escapeHtml(reportLabels.brebis)}</span>（P列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="numero" title="点击修改名称">${escapeHtml(reportLabels.numero)}</span>（Q列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="reportGroup" title="点击修改名称">${escapeHtml(reportLabels.reportGroup)}</span>（H列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="callGroup" title="点击修改名称">${escapeHtml(reportLabels.callGroup)}</span>（I列）</div><div>匹配来源</div><div>操作</div></div>` + results.map((item, index) => `<div class="report-row ${item.source ? '' : 'unmatched'}"><div class="report-cell">${escapeHtml(item.row)}</div><div class="report-cell">${escapeHtml(item.brebis || '—')}</div><div class="report-cell">${item.phoneUrl ? `<a href="${escapeHtml(item.phoneUrl)}" target="_blank" rel="noopener">打开 WhatsApp</a>` : '—'}</div><div class="report-cell">${escapeHtml(item.reportGroup || '—')}</div><div class="report-cell">${escapeHtml(item.callGroup || '—')}</div><div class="report-cell match-source">${escapeHtml(item.source || '未匹配')}</div><div class="report-cell report-actions"><button class="copy-report icon-button secondary" data-report-index="${index}" aria-label="复制本条" title="复制本条">${copyIcon}</button><button class="refresh-match icon-button secondary" data-report-index="${index}" aria-label="重新匹配" title="重新匹配">${refreshIcon}</button></div></div>`).join('')
     : '<div class="empty-report">该日期没有交接报告记录。</div>';
 }
 const cleanCopyValue = value => String(value ?? '').replace(/\s*\r?\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
@@ -203,9 +204,47 @@ async function copyText(text) {
   const copied = document.execCommand('copy'); textarea.remove();
   if (!copied) throw new Error('复制失败');
 }
+async function refreshHandoffMatch(item) {
+  const config = await extensionStorage.sync.get({ targetUrl: '', targetTab: '', groupTab: '' });
+  if (!config.targetUrl || !config.groupTab) throw new Error('请先配置目标表格和群组配置分表。');
+  const token = await getGoogleToken();
+  const base = `https://sheets.googleapis.com/v4/spreadsheets/${parseSpreadsheetId(config.targetUrl)}`;
+  const target = quoteSheet(config.targetTab || 'Sheet1');
+  const lookup = quoteSheet(config.groupTab);
+  const [location, groups] = await Promise.all([
+    readValues(token, base, `${target}!W${item.row}:Y${item.row}`),
+    readValues(token, base, `${lookup}!A:I`)
+  ]);
+  const row = location.values?.[0] || [];
+  const candidates = [[row[2], 'Y→C'], [row[1], 'X→B'], [row[0], 'W→A']];
+  let found = null; let source = '';
+  for (const [value, label] of candidates) {
+    found = findHandoffMatch(value, groups.values || [], label === 'Y→C' ? 2 : label === 'X→B' ? 1 : 0);
+    if (found) { source = label; break; }
+  }
+  return { ...item, reportGroup: found?.[7] || '', callGroup: found?.[8] || '', source };
+}
 $('#reportResults').onclick = async event => {
   const label = event.target.closest('[data-report-label]');
   if (label) return;
+  const refreshButton = event.target.closest('.refresh-match');
+  if (refreshButton) {
+    const index = Number(refreshButton.dataset.reportIndex);
+    const item = displayedHandoffResults[index];
+    if (!item) return;
+    refreshButton.disabled = true; refreshButton.innerHTML = '…'; refreshButton.title = '匹配中';
+    try {
+      const updated = await refreshHandoffMatch(item);
+      displayedHandoffResults[index] = updated;
+      currentHandoffResults = currentHandoffResults.map(candidate => candidate.row === item.row ? updated : candidate);
+      await saveHandoffHistory([updated]);
+      renderHandoffResults(displayedHandoffResults, false);
+    } catch (error) {
+      refreshButton.disabled = false; refreshButton.innerHTML = refreshIcon; refreshButton.title = '重新匹配';
+      log(`第 ${item.row} 行重新匹配失败：${error.message || error}`, 'error');
+    }
+    return;
+  }
   const button = event.target.closest('.copy-report');
   if (!button) return;
   try { await copyText(handoffText(displayedHandoffResults[Number(button.dataset.reportIndex)])); button.innerHTML = '✓'; button.title = '已复制'; setTimeout(() => { button.innerHTML = copyIcon; button.title = '复制本条'; }, 1200); }

@@ -15,7 +15,8 @@ label{display:block;margin:18px 0;color:#415572;font-weight:700}input,select,tex
 @media(max-width:1050px){.layout{grid-template-columns:1fr 330px;padding:0 22px}.phase-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.phase{grid-template-columns:1fr;gap:8px}.phase-label{padding-top:0}.phase-label:before{top:3px;bottom:3px}}
 @media(max-width:760px){.topbar{height:auto;padding:16px 20px;flex-wrap:wrap;gap:12px}.layout{grid-template-columns:1fr;padding:0 16px;margin:20px auto}h2{font-size:24px}.hero{flex-direction:column;align-items:stretch;min-height:0;padding:24px}.hero:after{display:none}.hero .primary{width:100%;text-align:center}.connection{flex-wrap:wrap}}
 /* report copy action */
-.report-row{grid-template-columns:54px 1fr 1.2fr 1.2fr 1.2fr 90px 70px}
+.report-row{grid-template-columns:54px 1fr 1.2fr 1.2fr 1.2fr 90px 112px}
+.report-actions{display:flex;gap:6px}
 .editable-report-label{cursor:text;border-radius:6px;padding:3px 4px;outline:none}.editable-report-label:hover{background:#e1efff}.editable-report-label:focus{background:#fff;border:1px solid #6aa9ed;box-shadow:0 0 0 3px #5b9cff22}
 .layout{grid-template-columns:1fr;max-width:1280px}.main-col{max-width:1280px}
 .config-group{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:26px}.config-group legend{grid-column:1/-1}.target-config label:first-of-type,.config-group>.status,.config-group>.tip{grid-column:1/-1}.config-group label{margin:12px 0 0}.config-group input,.config-group select,.config-group textarea{margin-top:7px}.config-group>.status{margin-top:14px}
