@@ -57,6 +57,23 @@
     }
   };
 
+  // 深度查询：号码所在单元格先 Ctrl+C，再点本菜单。直接读剪贴板里的号码，
+  // 控制台会带着 ?phone= 打开并自动出结果。
+  const deepQuery = async () => {
+    try {
+      const raw = await navigator.clipboard.readText();
+      const digits = raw.replace(/\D/g, '');
+      if (digits.length < 8) {
+        notify('请先选中号码所在单元格按 Ctrl+C，再点“深度查询此号码”。', true);
+        return;
+      }
+      chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD', query: `?phone=${digits}` });
+      notify('正在打开深度查询…');
+    } catch (error) {
+      notify(error.message || '读取剪贴板失败，请重试。', true);
+    }
+  };
+
   const finishPendingTransfer = async pending => {
     if (!location.href.startsWith(pending.targetUrl)) return;
     if (Date.now() - pending.createdAt > 10 * 60 * 1000) {
@@ -64,9 +81,21 @@
       return;
     }
     if (pending.targetTab) {
-      const tab = [...document.querySelectorAll('[role="tab"]')]
-        .find(node => node.textContent.trim() === pending.targetTab);
-      if (tab) tab.click();
+      // Retry the scan briefly: right after page load the sheet tab bar may
+      // not be rendered yet. If the tab really is missing, STOP — pasting
+      // into whatever sheet happens to be open would corrupt the wrong table.
+      let tab = null;
+      for (let attempt = 0; attempt < 10 && !tab; attempt++) {
+        tab = [...document.querySelectorAll('[role="tab"]')]
+          .find(node => node.textContent.trim() === pending.targetTab);
+        if (!tab) await new Promise(resolve => setTimeout(resolve, 300));
+      }
+      if (!tab) {
+        notify(`没有找到目标分表“${pending.targetTab}”，已停止自动粘贴，避免贴错表。`, true);
+        await chrome.storage.local.remove('formTransferPending');
+        return;
+      }
+      tab.click();
     }
     await new Promise(resolve => setTimeout(resolve, 1800));
     await navigator.clipboard.writeText(pending.text);
@@ -107,29 +136,70 @@
     const existing = menu.querySelector(`[${marker}]`);
     if (existing) {
       if (menu.firstElementChild !== existing) menu.prepend(existing);
-      return;
+    } else {
+      const item = document.createElement('div');
+      item.setAttribute('role', 'menuitem');
+      item.setAttribute(marker, 'true');
+      item.textContent = MENU_LABEL;
+      Object.assign(item.style, {
+        cursor: 'pointer', padding: '8px 16px', color: '#202124',
+        font: '14px Arial', borderBottom: '1px solid #dadce0'
+      });
+      item.addEventListener('mouseenter', () => item.style.background = '#f1f3f4');
+      item.addEventListener('mouseleave', () => item.style.background = '');
+      item.addEventListener('click', event => { event.stopPropagation(); transfer(); });
+      menu.prepend(item);
     }
-    const item = document.createElement('div');
-    item.setAttribute('role', 'menuitem');
-    item.setAttribute(marker, 'true');
-    item.textContent = MENU_LABEL;
-    Object.assign(item.style, {
-      cursor: 'pointer', padding: '8px 16px', color: '#202124',
-      font: '14px Arial', borderBottom: '1px solid #dadce0'
-    });
-    item.addEventListener('mouseenter', () => item.style.background = '#f1f3f4');
-    item.addEventListener('mouseleave', () => item.style.background = '');
-    item.addEventListener('click', event => { event.stopPropagation(); transfer(); });
-    menu.prepend(item);
+    // 第二项：深度查询此号码（紧挨在“转交表格”下面，样式一致）。
+    const deepMarker = 'data-deep-query-item';
+    let deepItem = menu.querySelector(`[${deepMarker}]`);
+    if (!deepItem) {
+      deepItem = document.createElement('div');
+      deepItem.setAttribute('role', 'menuitem');
+      deepItem.setAttribute(deepMarker, 'true');
+      deepItem.textContent = '🔍 深度查询此号码';
+      Object.assign(deepItem.style, {
+        cursor: 'pointer', padding: '8px 16px', color: '#202124',
+        font: '14px Arial'
+      });
+      deepItem.addEventListener('mouseenter', () => deepItem.style.background = '#f1f3f4');
+      deepItem.addEventListener('mouseleave', () => deepItem.style.background = '');
+      deepItem.addEventListener('click', event => { event.stopPropagation(); deepQuery(); });
+      const transferItem = menu.querySelector(`[${marker}]`);
+      if (transferItem) transferItem.after(deepItem); else menu.prepend(deepItem);
+    }
+  };
+
+  let lastContextMenuPoint = null;
+  let contextMenuPointTimer = 0;
+
+  const isContextMenu = menu => {
+    if (!lastContextMenuPoint || menu.offsetParent === null) return false;
+    const rect = menu.getBoundingClientRect();
+    const tolerance = 24;
+    return lastContextMenuPoint.x >= rect.left - tolerance
+      && lastContextMenuPoint.x <= rect.right + tolerance
+      && lastContextMenuPoint.y >= rect.top - tolerance
+      && lastContextMenuPoint.y <= rect.bottom + tolerance;
   };
 
   const scanMenus = () => {
-    document.querySelectorAll('[role="menu"]').forEach(menu => {
-      if (menu.offsetParent !== null) addMenuItem(menu);
-    });
+    if (!lastContextMenuPoint) return;
+    const menus = [...document.querySelectorAll('[role="menu"]')].filter(isContextMenu);
+    const menu = menus[menus.length - 1];
+    if (menu) addMenuItem(menu);
   };
 
-  new MutationObserver(scanMenus).observe(document.documentElement, { childList: true, subtree: true });
+  // Sheets mutates the whole document constantly; rescanning on every
+  // mutation burns CPU. Coalesce to at most one scan per 200 ms (the
+  // contextmenu/mousedown handlers below still trigger immediate scans).
+  let scanPending = false;
+  const scheduleScan = () => {
+    if (scanPending) return;
+    scanPending = true;
+    setTimeout(() => { scanPending = false; scanMenus(); }, 200);
+  };
+  new MutationObserver(scheduleScan).observe(document.documentElement, { childList: true, subtree: true });
   const scanAfterContextMenu = () => {
     let attempts = 0;
     const poll = () => {
@@ -138,6 +208,14 @@
     };
     setTimeout(poll, 0);
   };
-  document.addEventListener('contextmenu', scanAfterContextMenu, true);
-  document.addEventListener('mousedown', event => { if (event.button === 2) scanAfterContextMenu(); }, true);
+  const rememberContextMenuPoint = event => {
+    lastContextMenuPoint = { x: event.clientX, y: event.clientY };
+    clearTimeout(contextMenuPointTimer);
+    contextMenuPointTimer = setTimeout(() => { lastContextMenuPoint = null; }, 1500);
+    scanAfterContextMenu();
+  };
+  document.addEventListener('contextmenu', rememberContextMenuPoint, true);
+  document.addEventListener('mousedown', event => {
+    if (event.button === 2) rememberContextMenuPoint(event);
+  }, true);
 })();

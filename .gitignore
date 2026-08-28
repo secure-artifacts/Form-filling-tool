@@ -17,6 +17,9 @@ form-filling-config-*.json
 *-config-*.json
 *.zip
 
+# Local address/sample data — do not publish
+Adresse exemple.xlsx
+
 # Local caches and generated data
 storage/
 cache/

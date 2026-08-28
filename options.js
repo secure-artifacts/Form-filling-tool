@@ -8,12 +8,12 @@ chrome.storage.sync.get({ targetUrl: '', targetTab: '' }).then(values => {
 });
 
 document.querySelector('#save').addEventListener('click', async () => {
-  if (!url.value.startsWith('https://docs.google.com/spreadsheets/')) {
+  if (!url.value.trim().startsWith('https://docs.google.com/spreadsheets/')) {
     status.textContent = '请输入有效的 Google 表格网址';
     status.style.color = '#c5221f';
     return;
   }
-  await chrome.storage.sync.set({ targetUrl: url.value, targetTab: tab.value.trim() });
+  await chrome.storage.sync.set({ targetUrl: url.value.trim(), targetTab: tab.value.trim() });
   status.textContent = '已保存';
   status.style.color = '#188038';
 });
