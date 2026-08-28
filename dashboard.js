@@ -1533,21 +1533,39 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
       }
       startRow = DATA_START_ROW;
     } else {
-      let bottomBlockStart = lastDataIndex;
-      while (bottomBlockStart > DATA_START_ROW - 1 && hasData(rows[bottomBlockStart - 1])) bottomBlockStart--;
-      let availableEndRow = bottomBlockStart; // 1-based row immediately before the bottom data block.
-      const availableRows = Math.max(availableEndRow - DATA_START_ROW + 1, 0);
+      // A blank row between two data blocks is a separator, not a write slot.
+      // Use the data row immediately above the lowest such separator as the
+      // boundary, so rows below it (including the separator) stay untouched.
+      let boundaryIndex = lastDataIndex;
+      let separatorFound = false;
+      for (let index = lastDataIndex - 1; index >= DATA_START_ROW; index--) {
+        if (hasData(rows[index]) || !hasData(rows[index + 1])) continue;
+        let previousDataIndex = index - 1;
+        while (previousDataIndex >= DATA_START_ROW - 1 && !hasData(rows[previousDataIndex])) previousDataIndex--;
+        if (previousDataIndex >= DATA_START_ROW - 1) {
+          boundaryIndex = previousDataIndex;
+          separatorFound = true;
+          break;
+        }
+      }
+      if (!separatorFound) {
+        while (boundaryIndex > DATA_START_ROW - 1 && hasData(rows[boundaryIndex - 1])) boundaryIndex--;
+      }
+      let emptyStartIndex = boundaryIndex;
+      while (emptyStartIndex > DATA_START_ROW - 1 && !hasData(rows[emptyStartIndex - 1])) emptyStartIndex--;
+      let availableEndRow = boundaryIndex; // 1-based row immediately before the boundary data row.
+      const availableRows = Math.max(boundaryIndex - emptyStartIndex, 0);
       const insertCount = Math.max(values.length - availableRows, 0);
       if (insertCount) {
         if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法在数据块前增加行。');
         await sheetsRequest(token, base + '/values:batchUpdate', {
           method: 'POST',
-          body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: bottomBlockStart, endIndex: bottomBlockStart + insertCount } }] })
+          body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: boundaryIndex, endIndex: boundaryIndex + insertCount } }] })
         });
         const historyScope = makeHistoryScope(spreadsheetId, sheetTitle);
-        await shiftHandoffHistoryRows(insertCount, historyScope, bottomBlockStart + 1);
+        await shiftHandoffHistoryRows(insertCount, historyScope, boundaryIndex + 1);
         availableEndRow += insertCount;
-        log('第 ' + (bottomBlockStart + 1) + ' 行前空位不足，已增加 ' + insertCount + ' 行；新数据仍填在底部数据块上方。', 'success');
+        log('第 ' + (boundaryIndex + 1) + ' 行前连续空位不足，已增加 ' + insertCount + ' 行；原有数据和空白分隔行均保留。', 'success');
       }
       startRow = availableEndRow - values.length + 1;
     }
