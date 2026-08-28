@@ -318,9 +318,8 @@ async function saveHandoffHistory(results) {
   await extensionStorage.local.set({ handoffHistory: limited });
   populateReportDates(limited);
 }
-// Inserting new rows at row 3 shifts every existing report row down. Keep the
-// locally cached report history aligned with that deliberate sheet mutation.
-async function shiftHandoffHistoryRows(delta, scope) {
+// Keep locally cached report rows aligned when rows are inserted before data.
+async function shiftHandoffHistoryRows(delta, scope, fromRow = DATA_START_ROW) {
   if (!delta) return;
   const stored = await extensionStorage.local.get({ handoffHistory: {} });
   const history = { ...(stored.handoffHistory || {}) };
@@ -332,7 +331,7 @@ async function shiftHandoffHistoryRows(delta, scope) {
       if (!Number.isFinite(Number(item?.row))) continue;
       // Legacy records had no scope. If the whole cache is legacy, preserve
       // its behavior; once scoped records exist, only shift the matching tab.
-      if (!hasScopedHistory || item.historyScope === scope) item.row = Number(item.row) + delta;
+      if ((!hasScopedHistory || item.historyScope === scope) && Number(item.row) >= fromRow) item.row = Number(item.row) + delta;
     }
   }
   await extensionStorage.local.set({ handoffHistory: history });
@@ -1513,32 +1512,48 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
     log(`上次转交已把本选区写入 ${sheetTitle}!C${startRow}:BM${startRow + rowCount - 1}，这次不重复写入，只补齐剩余字段。`, 'success');
   } else {
     if (committed) await extensionStorage.local.remove('formTransferCommitted');
-    // New records always go to the top of the data area. Rows 1-2 are headers;
-    // blank rows below the first record are deliberately ignored.
+    // Fill the blank area immediately above the bottom data block. This keeps
+    // new rows in the existing data area instead of creating empty rows below it.
     const current = await sheetsRequest(token, base + '/values/' + encodeURIComponent(sheet + '!A:BM') + '?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE');
     const rows = current.values || [];
-    const firstDataIndex = rows.findIndex((row, index) => index >= DATA_START_ROW - 1 && hasData(row));
-    const firstDataRow = firstDataIndex < 0 ? null : firstDataIndex + 1;
     const gridRowCount = Number(sheetInfo.gridProperties?.rowCount || 0);
-    const availableTopRows = firstDataRow === null
-      ? Math.max(gridRowCount - DATA_START_ROW + 1, 0)
-      : Math.max(firstDataRow - DATA_START_ROW, 0);
-    const insertCount = Math.max(values.length - availableTopRows, 0);
-    if (insertCount) {
-      if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法在表头后插入新行。');
-      const insertIndex = DATA_START_ROW - 1; // Sheets API row indexes are 0-based.
-      await sheetsRequest(token, base + '/values:batchUpdate', {
-        method: 'POST',
-        body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: insertIndex, endIndex: insertIndex + insertCount } }] })
-      });
-      const historyScope = makeHistoryScope(spreadsheetId, sheetTitle);
-      await shiftHandoffHistoryRows(insertCount, historyScope);
-      log('表头后只有 ' + availableTopRows + ' 行空位，已在第 ' + DATA_START_ROW + ' 行插入 ' + insertCount + ' 行；新数据写入最上方。', 'success');
+    const lastDataIndex = rows.reduce((last, row, index) => index >= DATA_START_ROW - 1 && hasData(row) ? index : last, -1);
+    if (lastDataIndex < 0) {
+      // An empty sheet starts at the first data row; only grow the grid if
+      // that range does not exist yet.
+      const availableRows = Math.max(gridRowCount - DATA_START_ROW + 1, 0);
+      const insertCount = Math.max(values.length - availableRows, 0);
+      if (insertCount) {
+        if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法增加目标表行数。');
+        await sheetsRequest(token, base + '/values:batchUpdate', {
+          method: 'POST',
+          body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: gridRowCount, endIndex: gridRowCount + insertCount } }] })
+        });
+        log('目标表行数不足，已在底部增加 ' + insertCount + ' 行。', 'success');
+      }
+      startRow = DATA_START_ROW;
+    } else {
+      let bottomBlockStart = lastDataIndex;
+      while (bottomBlockStart > DATA_START_ROW - 1 && hasData(rows[bottomBlockStart - 1])) bottomBlockStart--;
+      let availableEndRow = bottomBlockStart; // 1-based row immediately before the bottom data block.
+      const availableRows = Math.max(availableEndRow - DATA_START_ROW + 1, 0);
+      const insertCount = Math.max(values.length - availableRows, 0);
+      if (insertCount) {
+        if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法在数据块前增加行。');
+        await sheetsRequest(token, base + '/values:batchUpdate', {
+          method: 'POST',
+          body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: bottomBlockStart, endIndex: bottomBlockStart + insertCount } }] })
+        });
+        const historyScope = makeHistoryScope(spreadsheetId, sheetTitle);
+        await shiftHandoffHistoryRows(insertCount, historyScope, bottomBlockStart + 1);
+        availableEndRow += insertCount;
+        log('第 ' + (bottomBlockStart + 1) + ' 行前空位不足，已增加 ' + insertCount + ' 行；新数据仍填在底部数据块上方。', 'success');
+      }
+      startRow = availableEndRow - values.length + 1;
     }
-    startRow = DATA_START_ROW;
     rowCount = values.length;
     setStep(2, 2);
-    log('已确定最上方写入区域：' + sheetTitle + '!C' + startRow + ':BM' + (startRow + rowCount - 1) + '（第 1、2 行为表头）。');
+    log('已确定写入区域：' + sheetTitle + '!C' + startRow + ':BM' + (startRow + rowCount - 1) + '（从底部数据块向上填充）。');
     const writeRange = encodeURIComponent(sheet + '!C' + startRow + ':BM' + (startRow + rowCount - 1));
     await sheetsRequest(token, base + '/values/' + writeRange + '?valueInputOption=RAW', {
       method: 'PUT', body: JSON.stringify({ range: sheet + '!C' + startRow + ':BM' + (startRow + rowCount - 1), majorDimension: 'ROWS', values })
