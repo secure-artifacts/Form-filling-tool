@@ -1517,8 +1517,8 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
     const current = await sheetsRequest(token, base + '/values/' + encodeURIComponent(sheet + '!A:BM') + '?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE');
     const rows = current.values || [];
     const gridRowCount = Number(sheetInfo.gridProperties?.rowCount || 0);
-    const lastDataIndex = rows.reduce((last, row, index) => index >= DATA_START_ROW - 1 && hasData(row) ? index : last, -1);
-    if (lastDataIndex < 0) {
+    const firstDataIndex = rows.findIndex((row, index) => index >= DATA_START_ROW - 1 && hasData(row));
+    if (firstDataIndex < 0) {
       // An empty sheet starts at the first data row; only grow the grid if
       // that range does not exist yet.
       const availableRows = Math.max(gridRowCount - DATA_START_ROW + 1, 0);
@@ -1533,45 +1533,28 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
       }
       startRow = DATA_START_ROW;
     } else {
-      // A blank row between two data blocks is a separator, not a write slot.
-      // Use the data row immediately above the lowest such separator as the
-      // boundary, so rows below it (including the separator) stay untouched.
-      let boundaryIndex = lastDataIndex;
-      let separatorFound = false;
-      for (let index = lastDataIndex - 1; index >= DATA_START_ROW; index--) {
-        if (hasData(rows[index]) || !hasData(rows[index + 1])) continue;
-        let previousDataIndex = index - 1;
-        while (previousDataIndex >= DATA_START_ROW - 1 && !hasData(rows[previousDataIndex])) previousDataIndex--;
-        if (previousDataIndex >= DATA_START_ROW - 1) {
-          boundaryIndex = previousDataIndex;
-          separatorFound = true;
-          break;
-        }
-      }
-      if (!separatorFound) {
-        while (boundaryIndex > DATA_START_ROW - 1 && hasData(rows[boundaryIndex - 1])) boundaryIndex--;
-      }
-      let emptyStartIndex = boundaryIndex;
-      while (emptyStartIndex > DATA_START_ROW - 1 && !hasData(rows[emptyStartIndex - 1])) emptyStartIndex--;
-      let availableEndRow = boundaryIndex; // 1-based row immediately before the boundary data row.
-      const availableRows = Math.max(boundaryIndex - emptyStartIndex, 0);
+      // Only use the empty area between the headers and the first data row.
+      // Anything below that first data row, including blank separators, is
+      // outside the transfer area and must not affect placement.
+      let availableEndRow = firstDataIndex; // 1-based row immediately before the first data row.
+      const availableRows = Math.max(firstDataIndex - (DATA_START_ROW - 1), 0);
       const insertCount = Math.max(values.length - availableRows, 0);
       if (insertCount) {
         if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法在数据块前增加行。');
         await sheetsRequest(token, base + ':batchUpdate', {
           method: 'POST',
-          body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: boundaryIndex, endIndex: boundaryIndex + insertCount } } }] })
+          body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: firstDataIndex, endIndex: firstDataIndex + insertCount } } }] })
         });
         const historyScope = makeHistoryScope(spreadsheetId, sheetTitle);
-        await shiftHandoffHistoryRows(insertCount, historyScope, boundaryIndex + 1);
+        await shiftHandoffHistoryRows(insertCount, historyScope, firstDataIndex + 1);
         availableEndRow += insertCount;
-        log('第 ' + (boundaryIndex + 1) + ' 行前连续空位不足，已增加 ' + insertCount + ' 行；原有数据和空白分隔行均保留。', 'success');
+        log('第 ' + (firstDataIndex + 1) + ' 行前空位不足，已增加 ' + insertCount + ' 行；按最上面数据行重新计算写入位置。', 'success');
       }
       startRow = availableEndRow - values.length + 1;
     }
     rowCount = values.length;
     setStep(2, 2);
-    log('已确定写入区域：' + sheetTitle + '!C' + startRow + ':BM' + (startRow + rowCount - 1) + '（从底部数据块向上填充）。');
+    log('已确定写入区域：' + sheetTitle + '!C' + startRow + ':BM' + (startRow + rowCount - 1) + '（按最上面数据行上方空位填充）。');
     const writeRange = encodeURIComponent(sheet + '!C' + startRow + ':BM' + (startRow + rowCount - 1));
     await sheetsRequest(token, base + '/values/' + writeRange + '?valueInputOption=RAW', {
       method: 'PUT', body: JSON.stringify({ range: sheet + '!C' + startRow + ':BM' + (startRow + rowCount - 1), majorDimension: 'ROWS', values })
