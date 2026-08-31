@@ -1527,7 +1527,7 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
         if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法增加目标表行数。');
         await sheetsRequest(token, base + ':batchUpdate', {
           method: 'POST',
-          body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: gridRowCount, endIndex: gridRowCount + insertCount } }] })
+          body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: gridRowCount, endIndex: gridRowCount + insertCount } } }] })
         });
         log('目标表行数不足，已在底部增加 ' + insertCount + ' 行。', 'success');
       }
@@ -1560,7 +1560,7 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
         if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法在数据块前增加行。');
         await sheetsRequest(token, base + ':batchUpdate', {
           method: 'POST',
-          body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: boundaryIndex, endIndex: boundaryIndex + insertCount } }] })
+          body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: boundaryIndex, endIndex: boundaryIndex + insertCount } } }] })
         });
         const historyScope = makeHistoryScope(spreadsheetId, sheetTitle);
         await shiftHandoffHistoryRows(insertCount, historyScope, boundaryIndex + 1);
