@@ -13,36 +13,44 @@
   </header>
   <main class="layout">
     <section class="main-col">
-      <div class="hero card"><div><p class="eyebrow">当前流程</p><h2>转交表格</h2><p id="heroText">等待从 Google 表格接收选区数据。</p></div><button id="start" class="primary">开始转交</button></div>
-      <nav class="view-tabs" aria-label="控制台页面"><button id="workflowTab" class="view-tab active">流程控制</button><button id="reportTab" class="view-tab">交接报告 <span id="reportCount">0</span></button><button id="deepTab" class="view-tab">深度查询</button><button id="configTab" class="view-tab">参数配置</button></nav>
+      <div class="hero card"><div><p class="eyebrow">当前流程</p><h2>转交表格</h2><p id="heroText">等待从 Google 表格接收选区数据。</p></div><div class="hero-banner" aria-hidden="true"><img id="heroBanner" src="assets/team-africa-banner.png" alt=""></div><button id="start" class="primary">开始转交</button></div>
+      <nav class="view-tabs" aria-label="控制台页面"><button id="workflowTab" class="view-tab active">流程控制</button><button id="reportTab" class="view-tab">交接报告 <span id="reportCount">0</span></button><button id="deepTab" class="view-tab">深度查询</button><button id="realtimeTab" class="view-tab">实时记录</button><button id="configTab" class="view-tab">参数配置</button></nav>
       <div id="workflowView"><div class="card"><div class="section-title"><h3>流程进度</h3><span id="progressText">0 / 13</span></div><div class="phases" id="phases"></div></div>
       <div class="card"><div class="section-title"><h3>执行日志</h3><button id="retryFailedRows" class="link" hidden>重跑上次失败行</button><button id="clearLog" class="link">清空</button></div><div class="logs" id="logs"></div></div></div>
       <div id="reportView" class="card report-view" hidden><div class="section-title"><div><h3>交接报告结果</h3></div><div class="report-tools"><label>按日期查看<select id="reportDateFilter"><option value="">本次结果</option></select></label><span id="reportStatus" class="badge">尚未生成</span><input id="reportRebuildDate" class="report-rebuild-date" type="date" title="留空表示重建全部日期"><button id="rebuildReports" class="secondary report-action-button">从目标表重建</button><button id="clearHandoffHistory" class="secondary report-action-button danger-action">清空历史</button><button id="rematchAllReports" class="secondary report-action-button">一键重新匹配</button><button id="copyAllReports" class="secondary report-action-button">复制全部</button></div></div><div id="reportResults" class="report-results"><div class="empty-report">流程完成后，这里会显示交接报告。</div></div></div>
       <div id="deepView" class="card deep-view" hidden><div class="section-title"><div><h3>深度查询</h3><p class="report-subtitle">输入手机号，在目标分表 Q 列定位人员并取出地址；再到群组配置分表按地址精确匹配那一行，返回跟进人员(E)、所属群组(F)、群组表格链接(G)与 13h00(J)/18h00(L)/21h30(O) 三个时段群组链接</p></div></div>
-        <div class="deep-tools"><textarea id="deepPhone" rows="3" placeholder="输入或粘贴手机号，每行一个；也支持用空格、逗号、分号或 Tab 分隔（Ctrl+Enter 查询）"></textarea><button id="deepSearch" class="primary">查询</button></div>
+        <div class="deep-tools"><textarea id="deepPhone" rows="2" placeholder="输入或粘贴手机号，每行一个；也支持用空格、逗号、分号或 Tab 分隔（Ctrl+Enter 查询）"></textarea><button id="deepSearch" class="primary">查询</button></div>
         <p id="deepStatus" class="status"></p>
         <div id="deepResults" class="deep-results"><div class="empty-report">输入号码开始查询。</div></div>
       </div>
+      <div id="realtimeView" class="card realtime-view" hidden><div class="section-title"><div><h3>实时记录</h3><p class="report-subtitle">用目标表 O 列的手机号或 ID，去记录表 A 列匹配并读取 B 列。</p></div></div>
+        <div class="realtime-tools"><textarea id="realtimeRecordId" rows="2" placeholder="多个手机号或 ID：每行一个，也支持 Tab、逗号、分号（Ctrl+Enter 查询）"></textarea><button id="realtimeSearch" class="primary">查询实时记录</button><button id="clearRealtimeQueries" class="secondary" type="button">清理查询记录</button></div>
+        <p id="realtimeStatus" class="status"></p>
+        <div id="realtimeResults" class="realtime-results"><div class="empty-report">从目标表右键选择“实时记录”，或在上面输入 ID 查询。</div></div>
+      </div>
       <div id="configView" class="config-view" hidden><div class="card"><div class="section-title"><h3>参数配置</h3><span class="badge">本机保存</span></div>
         <fieldset class="config-group target-config"><legend>转交目标</legend>
+          <label>源数据来源<select id="transferGroup"><option value="group1">队伍1（非）</option><option value="group2">队伍2（欧）</option></select></label>
           <label>目标表格网址<input id="targetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit"></label>
           <label>目标分表名称<input id="targetTab" placeholder="例如：2026年6月"></label>
-          <label>A列日期<select id="aDateValue"><option value="">请选择 A 列日期/时间</option><option value="1 p.m.">1 p.m.</option><option value="6 p.m.">6 p.m.</option><option value="8 p.m.">8 p.m.</option><option value="9:30 p.m.">9:30 p.m.</option></select></label>
+          <label>A列日期<select id="aDateValue"><option value="">请选择 A 列日期/时间</option><option value="10 a.m.">10 a.m.</option><option value="1 p.m.">1 p.m.</option><option value="6 p.m.">6 p.m.</option><option value="8 p.m.">8 p.m.</option><option value="8:30 p.m.">8:30 p.m.</option><option value="9:30 p.m.">9:30 p.m.</option></select></label>
           <label>E列状态<input id="statusText" placeholder="请输入要写入 E 列的状态"></label>
           <label>人员 ID<input id="personnelId" placeholder="输入人员 ID，将写入 I 列"></label>
         </fieldset>
         <fieldset class="config-group smart-config"><legend>智能补全</legend>
           <label>地区配置分表<input id="regionTab" placeholder="请输入地区配置分表名称"></label>
           <label>群组配置分表<input id="groupTab" placeholder="请输入群组配置分表名称"></label>
-          <label class="check-line"><input id="handoffStrictCity" type="checkbox">交接报告只认市区级匹配（省级/国家级只标注来源，不给链接）</label>
           <p id="regionCacheStatus" class="status">授权后自动读取，之后每天 12:00 检查</p>
           <label>拆解模型<select id="llmProvider"><option value="groq">Groq</option><option value="gemini">Gemini</option></select></label>
-          <label id="llmKeyLabel">Groq API Keys（每行一个）<textarea id="llmKey" rows="4" spellcheck="false" autocomplete="off" placeholder="gsk_...&#10;gsk_..."></textarea></label>
+          <label id="llmKeyLabel">Groq API Keys（每行一个） <a class="api-key-help" href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer">申请 API Key</a><span class="secret-field"><textarea id="llmKey" rows="4" spellcheck="false" autocomplete="off" placeholder="gsk_...&#10;gsk_..."></textarea><button id="toggleLlmKey" class="secret-toggle" type="button" aria-label="显示 API Key" title="显示 API Key">👁</button></span></label>
           <p class="tip">Groq 可填写多个 Key，每行一个；遇到限流会自动轮询。Key 只保存在本机扩展存储中。</p>
         </fieldset>
-        <button id="save" class="secondary">保存配置</button>
+        <fieldset class="config-group realtime-config"><legend>实时记录</legend>
+          <label>记录表网址<input id="realtimeRecordUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit"></label>
+          <label>记录表分表名称<input id="realtimeRecordTab" placeholder="例如：Sheet1"></label>
+        </fieldset>
         <p id="saveStatus" class="status"></p>
-        <div class="config-backup"><button id="exportConfig" class="secondary">导出配置</button><button id="importConfig" class="secondary">导入配置</button><button id="clearConfig" class="danger-button">清除所有配置</button><input id="configFile" type="file" accept="application/json,.json" hidden><p>导出文件包含 API Key，请妥善保存，不要上传到公开仓库。</p></div>
+        <div class="config-backup"><button id="save" class="secondary">保存配置</button><button id="exportConfig" class="secondary">导出配置</button><button id="importConfig" class="secondary">导入配置</button><button id="clearConfig" class="danger-button">清除所有配置</button><input id="configFile" type="file" accept="application/json,.json" hidden><p>导出文件包含 API Key，请妥善保存，不要上传到公开仓库。</p></div>
       </div></div>
     </section>
   </main>

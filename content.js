@@ -74,6 +74,20 @@
     }
   };
 
+  const realtimeRecord = async () => {
+    try {
+      const raw = (await navigator.clipboard.readText()).trim();
+      if (!raw) {
+        notify('请先选中 O 列里的手机号或 ID 后按 Ctrl+C，再点“实时记录”。', true);
+        return;
+      }
+      chrome.runtime.sendMessage({ type: 'OPEN_DASHBOARD', query: `?record=${encodeURIComponent(raw)}` });
+      notify('正在打开实时记录…');
+    } catch (error) {
+      notify(error.message || '读取剪贴板失败，请重试。', true);
+    }
+  };
+
   const finishPendingTransfer = async pending => {
     if (!location.href.startsWith(pending.targetUrl)) return;
     if (Date.now() - pending.createdAt > 10 * 60 * 1000) {
@@ -167,6 +181,22 @@
       deepItem.addEventListener('click', event => { event.stopPropagation(); deepQuery(); });
       const transferItem = menu.querySelector(`[${marker}]`);
       if (transferItem) transferItem.after(deepItem); else menu.prepend(deepItem);
+    }
+    const realtimeMarker = 'data-realtime-record-item';
+    let realtimeItem = menu.querySelector(`[${realtimeMarker}]`);
+    if (!realtimeItem) {
+      realtimeItem = document.createElement('div');
+      realtimeItem.setAttribute('role', 'menuitem');
+      realtimeItem.setAttribute(realtimeMarker, 'true');
+      realtimeItem.textContent = '⏱ 实时记录';
+      Object.assign(realtimeItem.style, {
+        cursor: 'pointer', padding: '8px 16px', color: '#202124',
+        font: '14px Arial'
+      });
+      realtimeItem.addEventListener('mouseenter', () => realtimeItem.style.background = '#f1f3f4');
+      realtimeItem.addEventListener('mouseleave', () => realtimeItem.style.background = '');
+      realtimeItem.addEventListener('click', event => { event.stopPropagation(); realtimeRecord(); });
+      if (deepItem) deepItem.after(realtimeItem); else if (transferItem) transferItem.after(realtimeItem); else menu.prepend(realtimeItem);
     }
   };
 

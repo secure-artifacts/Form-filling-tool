@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "表格转交",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1K0037vESCVcqUQ2KQc2ngsWysYZ0ICpmv57W2QRj3hT7vHg/w5l1UoRIClzZA9B6NwzxuzvTQ0unrrqJ02ufc1S4PlHPOVsejSMLiXOwCKkrJdPSQaq7Qw73/AwrAbFmUwAe5VPpf5LSWr61ZVYYpJ0yQ2hmoJeWEdUtXvUlQh53J+g9oWPy1Nh3eYEqfK/cRgd2zK7bVBGniq9SabsH6D/5YvgExDc/9GJCUmmu39FAMYK346TDIOa8rZVEBfBTajqdEqazSJ0zd1mhC4BTT9xfpYrll/slQsMZhdG5qNYUX5QEHGI0M6XDHmo9fpPM8uxaOXtwnVUynlme+HfwQIDAQAB",
   "description": "把 Google 表格当前选中的数据无格式转交到指定表格分表。",
   "permissions": ["storage", "clipboardRead", "clipboardWrite", "identity", "alarms"],

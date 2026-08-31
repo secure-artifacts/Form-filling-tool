@@ -54,6 +54,7 @@ const parseSpreadsheetId = value => {
   return match[1];
 };
 const quoteSheet = name => `'${(name || 'Sheet1').replaceAll("'", "''")}'`;
+const rawTsvRows = text => String(text || '').replace(/\r/g, '').split('\n').filter((row, index, rows) => row || index < rows.length - 1).map(row => row.split('\t').map(cell => String(cell).replace(/\uE000/g, '\n')));
 // fromColumnA: null = 自动猜测（存在 64 个以上单元格的行则认为从 A 列开始）；
 // true/false = 用户在写入前确认框里手动指定，覆盖猜测结果。
 const parseTsv = (text, fromColumnA = null) => {
@@ -76,9 +77,35 @@ const sheetColumnName = number => {
   while (number > 0) { const remainder = (number - 1) % 26; name = String.fromCharCode(65 + remainder) + name; number = Math.floor((number - 1) / 26); }
   return name;
 };
+const sheetColumnNumber = name => [...String(name).toUpperCase()].reduce((number, letter) => number * 26 + letter.charCodeAt(0) - 64, 0);
+const group2ColumnMap = [
+  ['B', 'F'], ['I', 'K'], ['L', 'M'], ['M', 'M'], ['O', 'P'], ['P', 'Q'], ['Q', 'O'],
+  ['T', 'R'], ['U', 'S'], ['V', 'T'], ['W', 'V'], ['AD', 'AL'], ['H', 'AF'],
+  ['K', 'N'], ['R', 'AG'], ['J', 'J'],
+  ...Array.from({ length: 16 }, (_, index) => [sheetColumnName(index + sheetColumnNumber('AE')), sheetColumnName(index + sheetColumnNumber('AX'))])
+].map(([source, target]) => ({ sourceIndex: sheetColumnNumber(source) - 1, targetIndex: sheetColumnNumber(target) - 3, target }));
+const joinGroup2Names = (first, second) => [first, second].map(value => String(value ?? '').trim()).filter(Boolean).join(' / ');
+const parseGroup2Tsv = (text, fromColumnA = null) => {
+  const rows = rawTsvRows(text);
+  const startsAtA = fromColumnA === null ? rows.some(row => row.length >= COLUMN_COUNT + 1) : fromColumnA;
+  const sourceOffset = startsAtA ? 0 : 1;
+  const values = rows.map(row => {
+    const targetRow = Array(COLUMN_COUNT).fill('');
+    for (const entry of group2ColumnMap) {
+      const value = row[entry.sourceIndex - sourceOffset] ?? '';
+      if (entry.target === 'M') targetRow[entry.targetIndex] = joinGroup2Names(targetRow[entry.targetIndex], value);
+      else targetRow[entry.targetIndex] = value;
+    }
+    return targetRow;
+  });
+  return values.filter(row => row.some(value => String(value ?? '').trim() !== ''));
+};
+const parseTransferValues = (text, transferGroup = 'group1', fromColumnA = null) => transferGroup === 'group2'
+  ? parseGroup2Tsv(text, fromColumnA)
+  : parseTsv(text, fromColumnA);
 // 写入前的选区预览：把解析出的前几列展示出来让用户核对有没有整体错列，
 // 并允许手动切换起始列。取消返回 null，确认返回最终 fromColumnA 布尔值。
-function showTransferPreview(text) {
+function showTransferPreview(text, transferGroup = 'group1') {
   return new Promise(resolve => {
     const autoDetected = text.replace(/\r/g, '').split('\n').some(row => row.split('\t').length >= COLUMN_COUNT + 1);
     let fromColumnA = autoDetected;
@@ -91,7 +118,9 @@ function showTransferPreview(text) {
     title.textContent = '写入前确认选区';
     const note = document.createElement('div');
     note.style.cssText = 'color:#5f6368;margin-bottom:12px;';
-    note.textContent = '请核对下面前几列的值与源表一致——若整体错了一列，通常是起始列判断反了，用下面的开关纠正。数据将写入目标表的 C:BM。';
+    note.textContent = transferGroup === 'group2'
+      ? '组别2会按内置列映射写入目标 C:BM；L 列和 M 列会合并写入目标 M 列。请确认预览中的字段对应正确。'
+      : '请核对下面前几列的值与源表一致——若整体错了一列，通常是起始列判断反了，用下面的开关纠正。数据将写入目标表的 C:BM。';
     const toggleBox = document.createElement('div');
     toggleBox.style.cssText = 'display:flex;gap:16px;align-items:center;margin-bottom:8px;';
     const makeRadio = (label, checked) => {
@@ -113,14 +142,24 @@ function showTransferPreview(text) {
     tableHolder.style.cssText = 'border:1px solid #dadce0;border-radius:8px;overflow:auto;margin-bottom:16px;max-height:320px;';
     const confirmButton = document.createElement('button');
     const render = () => {
-      const rows = parseTsv(text, fromColumnA);
+      let rows;
+      try { rows = parseTransferValues(text, transferGroup, fromColumnA); }
+      catch (error) {
+        summary.textContent = error.message || String(error);
+        tableHolder.innerHTML = '';
+        confirmButton.disabled = true; confirmButton.style.opacity = '.5';
+        return;
+      }
       const nonEmptyRows = rows.filter(row => row.some(value => value.trim() !== ''));
       const sample = nonEmptyRows.slice(0, 3);
-      summary.textContent = `解析到 ${nonEmptyRows.length} 个非空行 × ${COLUMN_COUNT} 列；当前按“源 ${fromColumnA ? 'A' : 'B'} 列 → 目标 C 列”对齐。`;
-      const head = Array.from({ length: 8 }, (_, index) =>
-        `<th style="position:sticky;top:0;background:#f1f3f4;padding:6px 10px;border-bottom:1px solid #dadce0;text-align:left;white-space:nowrap;">目标 ${sheetColumnName(index + 3)}<br><span style="color:#5f6368;font-weight:normal">源 ${sheetColumnName((fromColumnA ? 2 : 1) + index)}</span></th>`).join('');
+      const previewIndexes = transferGroup === 'group2' ? group2ColumnMap.slice(0, 8).map(entry => entry.targetIndex) : Array.from({ length: 8 }, (_, index) => index);
+      summary.textContent = transferGroup === 'group2'
+        ? `按组别2固定列映射解析到 ${nonEmptyRows.length} 个非空行 × ${COLUMN_COUNT} 个目标列。`
+        : `解析到 ${nonEmptyRows.length} 个非空行 × ${COLUMN_COUNT} 列；当前按“源 ${fromColumnA ? 'A' : 'B'} 列 → 目标 C 列”对齐。`;
+      const head = previewIndexes.map((targetIndex, index) =>
+        `<th style="position:sticky;top:0;background:#f1f3f4;padding:6px 10px;border-bottom:1px solid #dadce0;text-align:left;white-space:nowrap;">目标 ${sheetColumnName(targetIndex + 3)}<br><span style="color:#5f6368;font-weight:normal">${transferGroup === 'group2' ? `源 ${sheetColumnName(group2ColumnMap[index].sourceIndex + (fromColumnA ? 1 : 2))}` : `源 ${sheetColumnName((fromColumnA ? 2 : 1) + index)}`}</span></th>`).join('');
       const body = sample.map(row => `<tr>${Array.from({ length: 8 }, (_, index) => {
-        const value = String(row[index] ?? '');
+        const value = String(row[previewIndexes[index]] ?? '');
         const shown = escapeHtml(value.length > 26 ? `${value.slice(0, 25)}…` : value);
         return `<td style="padding:6px 10px;border-bottom:1px solid #f1f3f4;white-space:nowrap;">${shown || '<span style="color:#bbb">(空)</span>'}</td>`;
       }).join('')}</tr>`).join('');
@@ -228,6 +267,7 @@ async function sheetsRequest(token, url, init = {}) {
 }
 
 const readValues = (token, base, range) => sheetsRequest(token, `${base}/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE`);
+const readFormattedValues = (token, base, range) => sheetsRequest(token, `${base}/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`);
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ').trim();
 const unique = values => [...new Set(values.filter(Boolean))];
 const extractPersonalInfo = report => {
@@ -359,9 +399,7 @@ const nzHand = value => {
 // Kinshasa 同时出现在两个刚果下、Littoral 分属贝宁/喀麦隆、kabinda 在两个
 // 省都有）。目标行里本来就没有的层级（有的地区只有国家）跳过核对、自然落
 // 到下一级；群组表里留空的格子视为不一致，不猜。
-// opts.cityOnly：严格模式。省级/国家级回退命中时保留来源标注、但返回
-// found=null——调用方因此不写群组链接，宁缺毋滥。
-const findGroupRow = (groupRows, country, province, city, opts = {}) => {
+const findGroupRow = (groupRows, country, province, city) => {
   const wantedCountry = nzHand(country);
   const wantedProvince = nzHand(province);
   const wantedCity = nzHand(city);
@@ -381,11 +419,11 @@ const findGroupRow = (groupRows, country, province, city, opts = {}) => {
   }
   if (wantedProvince) {
     const found = pick(groupRows.filter(row => eqNz(nzHand(row[1]), wantedProvince)));
-    if (found) return opts.cityOnly ? { found: null, source: 'X→B（未取链接）' } : { found, source: 'X→B' };
+    if (found) return { found, source: 'X→B' };
   }
   if (wantedCountry) {
     const found = pick(groupRows.filter(row => eqNz(nzHand(row[0]), wantedCountry)));
-    if (found) return opts.cityOnly ? { found: null, source: 'W→A（未取链接）' } : { found, source: 'W→A' };
+    if (found) return { found, source: 'W→A' };
   }
   return { found: null, source: '' };
 };
@@ -424,7 +462,7 @@ async function copyText(text) {
   if (!copied) throw new Error('复制失败');
 }
 async function refreshHandoffMatch(item) {
-  const config = await extensionStorage.sync.get({ targetUrl: '', targetTab: '', groupTab: '', handoffStrictCity: false });
+  const config = await extensionStorage.sync.get({ targetUrl: '', targetTab: '', groupTab: '' });
   if (!config.targetUrl || !config.groupTab) throw new Error('请先配置目标表格和群组配置分表。');
   const token = await getGoogleToken();
   const base = `https://sheets.googleapis.com/v4/spreadsheets/${parseSpreadsheetId(config.targetUrl)}`;
@@ -445,7 +483,7 @@ async function refreshHandoffMatch(item) {
   }
   if (hitIndex < 0) throw new Error('目标分表 Q 列里没有找到这个号码——人员可能已被删除或改号。');
   const row = rows[hitIndex] || [];
-  const { found, source } = findGroupRow(groups.values || [], row[13] || '', row[14] || '', row[15] || '', { cityOnly: !!config.handoffStrictCity });
+  const { found, source } = findGroupRow(groups.values || [], row[13] || '', row[14] || '', row[15] || '');
   return { ...item, row: hitIndex + 1, submitter: row[0] || '', reportGroup: found?.[7] || '', callGroup: found?.[8] || '', source };
 }
 async function refreshAllReportMatches() {
@@ -522,7 +560,7 @@ $('#reportResults').onclick = async event => {
 async function rebuildReportsFromTarget() {
   const button = $('#rebuildReports');
   if (!button || button.disabled) return;
-  const config = await extensionStorage.sync.get({ targetUrl: '', targetTab: '', groupTab: '', handoffStrictCity: false });
+  const config = await extensionStorage.sync.get({ targetUrl: '', targetTab: '', groupTab: '' });
   if (!config.targetUrl || !config.targetTab || !config.groupTab) {
     log('请先在参数配置中填写目标表格、目标分表和群组配置分表。', 'error');
     return;
@@ -551,7 +589,7 @@ async function rebuildReportsFromTarget() {
       const hasRecord = [row[13], row[14], row[20], row[21], row[22]]
         .some(value => String(value ?? '').trim() !== '');
       if (!hasRecord) continue;
-      const { found, source } = findGroupRow(groupRows, row[20] || '', row[21] || '', row[22] || '', { cityOnly: !!config.handoffStrictCity });
+      const { found, source } = findGroupRow(groupRows, row[20] || '', row[21] || '', row[22] || '');
       results.push({
         row: sheetRow,
         historyScope: makeHistoryScope(parseSpreadsheetId(config.targetUrl), config.targetTab),
@@ -618,7 +656,6 @@ $('#copyAllReports').onclick = async event => {
 };
 async function buildHandoffReport(token, base, targetTab, groupTab, startRow, rowCount, historyScope = '') {
   if (!groupTab) throw new Error('尚未填写群组配置分表名称。');
-  const { handoffStrictCity: strictCity = false } = await extensionStorage.sync.get({ handoffStrictCity: false });
   const target = quoteSheet(targetTab || 'Sheet1');
   const lookup = quoteSheet(groupTab);
   const [location, brebis, phone, dates, submitters, groups] = await Promise.all([
@@ -633,7 +670,7 @@ async function buildHandoffReport(token, base, targetTab, groupTab, startRow, ro
   const results = [];
   for (let index = 0; index < rowCount; index++) {
     const row = locations[index] || [];
-    const { found, source } = findGroupRow(groupRows, row[0], row[1], row[2], { cityOnly: strictCity });
+    const { found, source } = findGroupRow(groupRows, row[0], row[1], row[2]);
     results.push({ row: startRow + index, historyScope, dateKey: normalizeReportDate(dateValues[index]?.[0]), brebis: brebisValues[index]?.[0] || '', submitter: submitterValues[index]?.[0] || '', phoneUrl: normalizePhoneUrl(phoneValues[index]?.[0]), reportGroup: found?.[7] || '', callGroup: found?.[8] || '', source });
   }
   const undatedCount = results.filter(item => !item.dateKey).length;
@@ -794,6 +831,14 @@ $('#llmProvider').onchange = async () => {
   const savedGroq = values.groqApiKeys?.length ? values.groqApiKeys : (values.groqApiKey ? [values.groqApiKey] : []);
   $('#llmKey').value = nextProvider === 'gemini' ? values.geminiApiKey : savedGroq.join('\n');
   updateLlmKeyLabel();
+};
+$('#toggleLlmKey').onclick = () => {
+  const keyField = $('#llmKey');
+  const visible = keyField.classList.toggle('secret-visible');
+  const button = $('#toggleLlmKey');
+  button.textContent = visible ? '🙈' : '👁';
+  button.setAttribute('aria-label', visible ? '隐藏 API Key' : '显示 API Key');
+  button.title = visible ? '隐藏 API Key' : '显示 API Key';
 };
 updateLlmKeyLabel();
 
@@ -1016,15 +1061,16 @@ async function callLlmWithRetry(provider, apiKeys, systemPrompt, userText) {
   }
 }
 
-$('#workflowTab').onclick = () => { $('#workflowTab').classList.add('active'); $('#reportTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#workflowView').hidden = false; $('#reportView').hidden = true; $('#configView').hidden = true; $('#deepView').hidden = true; };
+$('#workflowTab').onclick = () => { $('#workflowTab').classList.add('active'); $('#reportTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#realtimeTab').classList.remove('active'); $('#workflowView').hidden = false; $('#reportView').hidden = true; $('#configView').hidden = true; $('#deepView').hidden = true; $('#realtimeView').hidden = true; };
 $('#reportTab').onclick = () => {
   const entering = $('#reportView').hidden;
-  $('#reportTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#deepTab').classList.remove('active');
-  $('#workflowView').hidden = true; $('#reportView').hidden = false; $('#configView').hidden = true; $('#deepView').hidden = true;
+  $('#reportTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#realtimeTab').classList.remove('active');
+  $('#workflowView').hidden = true; $('#reportView').hidden = false; $('#configView').hidden = true; $('#deepView').hidden = true; $('#realtimeView').hidden = true;
   if (entering && displayedHandoffResults.length) void refreshAllReportMatches();
 };
-$('#configTab').onclick = () => { $('#configTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#reportTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#workflowView').hidden = true; $('#reportView').hidden = true; $('#configView').hidden = false; $('#deepView').hidden = true; };
-$('#deepTab').onclick = () => { $('#deepTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#reportTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#workflowView').hidden = true; $('#reportView').hidden = true; $('#configView').hidden = true; $('#deepView').hidden = false; };
+$('#configTab').onclick = () => { $('#configTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#reportTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#realtimeTab').classList.remove('active'); $('#workflowView').hidden = true; $('#reportView').hidden = true; $('#configView').hidden = false; $('#deepView').hidden = true; $('#realtimeView').hidden = true; };
+$('#deepTab').onclick = () => { $('#deepTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#reportTab').classList.remove('active'); $('#realtimeTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#workflowView').hidden = true; $('#reportView').hidden = true; $('#configView').hidden = true; $('#deepView').hidden = false; $('#realtimeView').hidden = true; };
+$('#realtimeTab').onclick = () => { $('#realtimeTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#reportTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#workflowView').hidden = true; $('#reportView').hidden = true; $('#configView').hidden = true; $('#deepView').hidden = true; $('#realtimeView').hidden = false; };
 
 // ── 深度查询：手机号 → 目标分表 Q 列定位 → 地址匹配群组配置 → 汇总展示 ──
 // 目标分表一次读 C1:Y，数组下标对应列：C=0 D=1 E=2 F=3 G=4 … P=13 Q=14 … W=20 X=21 Y=22。
@@ -1187,16 +1233,157 @@ $('#deepResults').addEventListener('click', async event => {
   } catch { /* 复制失败保持原样，用户可右键链接复制 */ }
 });
 $('#deepPhone').addEventListener('keydown', event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); $('#deepSearch').click(); } });
+const normalizeRealtimeKey = value => String(value ?? '').trim().toLocaleLowerCase().replace(/[\s\u200b\ufeff]/g, '');
+const realtimeKeyMatches = (left, right) => {
+  const a = normalizeRealtimeKey(left); const b = normalizeRealtimeKey(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const aDigits = a.replace(/\D/g, ''); const bDigits = b.replace(/\D/g, '');
+  return aDigits.length >= 6 && aDigits === bDigits;
+};
+const realtimeMarketClass = value => /上/.test(String(value || '')) ? 'up' : (/下/.test(String(value || '')) ? 'down' : '');
+const REALTIME_REFRESH_MS = 60 * 1000;
+let realtimeRefreshTimer = null;
+let realtimeRefreshQueries = [];
+let realtimeRefreshBusy = false;
+const parseRealtimeQueries = value => String(value || '').replace(/\r/g, '').split('\n').flatMap(line => line.split(/[,;，；\t]+/)).map(item => item.trim()).filter(Boolean).filter((item, index, values) => values.indexOf(item) === index);
+async function loadRealtimeRecordRows(token, recordUrl, recordTab) {
+  const recordBase = `https://sheets.googleapis.com/v4/spreadsheets/${parseSpreadsheetId(recordUrl)}`;
+  const recordMetadata = await sheetsRequest(token, `${recordBase}?fields=sheets(properties(title,gridProperties(rowCount)))`);
+  const recordSheets = (recordMetadata.sheets || []).map(item => item.properties).filter(Boolean);
+  const recordInfo = recordSheets.find(item => item.title === recordTab)
+    || recordSheets.find(item => item.title.trim() === recordTab.trim());
+  if (!recordInfo) {
+    const available = recordSheets.map(item => item.title).filter(Boolean).join('、');
+    throw new Error(`记录表中找不到分表“${recordTab}”。可用分表：${available || '未找到'}。`);
+  }
+  const recordSheet = quoteSheet(recordInfo.title);
+  const recordRowCount = Math.max(Number(recordInfo.gridProperties?.rowCount || 1), 1);
+  const recordData = await readFormattedValues(token, recordBase, `${recordSheet}!A1:B${recordRowCount}`);
+  return { rows: recordData.values || [], title: recordInfo.title };
+}
+function startRealtimeAutoRefresh() {
+  if (realtimeRefreshTimer) clearInterval(realtimeRefreshTimer);
+  realtimeRefreshTimer = setInterval(() => { void refreshRealtimeDurations(); }, REALTIME_REFRESH_MS);
+}
+async function refreshRealtimeDurations() {
+  if (realtimeRefreshBusy || !realtimeRefreshQueries.length || $('#realtimeView').hidden) return;
+  realtimeRefreshBusy = true;
+  try {
+    const config = await extensionStorage.sync.get({ realtimeRecordUrl: '', realtimeRecordTab: '' });
+    if (!config.realtimeRecordUrl || !config.realtimeRecordTab) return;
+    const token = await getGoogleToken();
+    const { rows } = await loadRealtimeRecordRows(token, config.realtimeRecordUrl, config.realtimeRecordTab);
+    const resultRows = $('#realtimeResults').querySelectorAll('tbody tr');
+    realtimeRefreshQueries.forEach((query, index) => {
+      const recordRow = rows.find(row => realtimeKeyMatches(row?.[0], query));
+      const cell = resultRows[index]?.lastElementChild;
+      if (!cell) return;
+      const market = recordRow?.[1] || '';
+      cell.textContent = market || '未找到';
+      cell.className = `realtime-market ${realtimeMarketClass(market)}`;
+    });
+  } catch (error) {
+    log(`实时记录自动刷新失败：${error.message || error}`, 'error');
+  } finally {
+    realtimeRefreshBusy = false;
+  }
+}
+function renderRealtimeRecords(items) {
+  const host = $('#realtimeResults');
+  if (!items.length) {
+    host.innerHTML = '<div class="empty-report">没有找到对应的实时记录。</div>';
+    return;
+  }
+  host.innerHTML = `<div class="realtime-table-wrap"><table class="realtime-table"><thead><tr><th>转交日期</th><th>ID</th><th>名字</th><th>联系方式</th><th>参加时长</th></tr></thead><tbody>${items.map(item => {
+    const marketClass = realtimeMarketClass(item.market);
+    const contact = String(item.contact || '').trim();
+    const contactDigits = contact.replace(/\D/g, '').replace(/^00/, '');
+    const contactLink = contactDigits ? `https://web.whatsapp.com/send?phone=${contactDigits}` : '';
+    return `<tr><td>${escapeHtml(item.transferDate || '—')}</td><td>${escapeHtml(item.id || '—')}</td><td>${escapeHtml(item.name || '—')}</td><td>${contactLink ? `<a class="realtime-contact-link" href="${contactLink}" target="_blank" rel="noopener">${escapeHtml(contact)}</a>` : '—'}</td><td class="realtime-market ${marketClass}">${escapeHtml(item.market || '未找到')}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+async function queryRealtimeRecord() {
+  const button = $('#realtimeSearch');
+  const status = $('#realtimeStatus');
+  const queries = parseRealtimeQueries($('#realtimeRecordId').value);
+  const config = await extensionStorage.sync.get({ targetUrl: '', targetTab: '', realtimeRecordUrl: '', realtimeRecordTab: '' });
+  const recordUrl = config.realtimeRecordUrl || '';
+  const recordTab = config.realtimeRecordTab || '';
+  if (!recordUrl) { status.textContent = '请先输入记录表 Google 表格链接。'; status.style.color = '#c5221f'; return; }
+  if (!recordTab) { status.textContent = '请先输入记录表分表名称。'; status.style.color = '#c5221f'; return; }
+  if (!queries.length) { status.textContent = '请输入目标表 O 列里的手机号或 ID。'; status.style.color = '#c5221f'; return; }
+  const targetConfig = config;
+  if (!targetConfig.targetUrl || !targetConfig.targetTab) { status.textContent = '请先在参数配置里填写目标表格网址和目标分表名称。'; status.style.color = '#c5221f'; return; }
+  button.disabled = true;
+  status.textContent = '正在读取目标表和记录表…'; status.style.color = '';
+  try {
+    const token = await getGoogleToken();
+    const targetBase = `https://sheets.googleapis.com/v4/spreadsheets/${parseSpreadsheetId(targetConfig.targetUrl)}`;
+    const targetSheet = quoteSheet(targetConfig.targetTab);
+    const targetData = await readFormattedValues(token, targetBase, `${targetSheet}!C:Q`);
+    const targetRows = targetData.values || [];
+    const { rows: recordRows, title: recordTitle } = await loadRealtimeRecordRows(token, recordUrl, recordTab);
+    const items = queries.map(query => {
+      const targetIndex = targetRows.findIndex((row, index) => index >= DATA_START_ROW - 1 && realtimeKeyMatches(row?.[12], query));
+      const targetRow = targetIndex >= 0 ? targetRows[targetIndex] || [] : [];
+      const recordRow = recordRows.find(row => realtimeKeyMatches(row?.[0], query));
+      return { transferDate: targetRow[0] || '', id: targetRow[12] || query, name: targetRow[13] || '', contact: targetRow[14] || '', market: recordRow?.[1] || '', targetFound: targetIndex >= 0, recordFound: !!recordRow };
+    });
+    renderRealtimeRecords(items);
+    realtimeRefreshQueries = queries;
+    await extensionStorage.local.set({ realtimeLastQueries: queries.join('\n') });
+    startRealtimeAutoRefresh();
+    const matched = items.filter(item => item.targetFound && item.recordFound).length;
+    status.textContent = `已查询 ${items.length} 条 · 成功 ${matched} 条 · 未匹配 ${items.length - matched} 条 · 记录表“${recordTitle}” · 每 1 分钟更新参加时长`;
+    status.style.color = '';
+  } catch (error) {
+    renderRealtimeRecords([]);
+    status.textContent = `实时记录查询失败：${error.message || error}`;
+    status.style.color = '#c5221f';
+    log(`实时记录查询失败：${error.message || error}`, 'error');
+  } finally {
+    button.disabled = false;
+  }
+}
+$('#realtimeSearch').onclick = () => { void queryRealtimeRecord(); };
+$('#clearRealtimeQueries').onclick = async () => {
+  if (realtimeRefreshTimer) { clearInterval(realtimeRefreshTimer); realtimeRefreshTimer = null; }
+  realtimeRefreshQueries = [];
+  $('#realtimeRecordId').value = '';
+  $('#realtimeResults').innerHTML = '<div class="empty-report">从目标表右键选择“实时记录”，或在上面输入 ID 查询。</div>';
+  $('#realtimeStatus').textContent = '查询记录已清理。';
+  $('#realtimeStatus').style.color = '';
+  await extensionStorage.local.remove('realtimeLastQueries');
+};
+$('#realtimeRecordId').addEventListener('keydown', event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); $('#realtimeSearch').click(); } });
 // 从表格右键菜单“🔍 深度查询此号码”直达：?phone=数字 → 自动填入、切换标签、
 // 已授权过就直接查询（没授权则停在输入框，点“授权 Google”后再按回车即可）。
 (async () => {
   const phoneParam = (new URLSearchParams(location.search).get('phone') || '').replace(/\D/g, '');
-  if (phoneParam.length < 8) return;
+  const recordParam = (new URLSearchParams(location.search).get('record') || '').trim();
+  const { realtimeLastQueries = '' } = await extensionStorage.local.get({ realtimeLastQueries: '' });
+  const savedRecordQueries = parseRealtimeQueries(realtimeLastQueries);
+  const incomingRecordQueries = parseRealtimeQueries(recordParam);
+  let restoredRecordQuery = recordParam || savedRecordQueries.join('\n');
+  if (incomingRecordQueries.length && savedRecordQueries.length && incomingRecordQueries.join('\n') !== savedRecordQueries.join('\n')) {
+    const append = window.confirm('已有实时记录查询。点击“确定”追加新号码/ID；点击“取消”全部覆盖。');
+    restoredRecordQuery = (append ? [...savedRecordQueries, ...incomingRecordQueries] : incomingRecordQueries)
+      .filter((item, index, values) => values.indexOf(item) === index).join('\n');
+  }
+  if (phoneParam.length < 8 && !restoredRecordQuery) return;
   history.replaceState(null, '', location.pathname);
-  $('#deepPhone').value = phoneParam;
   $('#deepTab').click();
   const { googleApiConnectedAt } = await extensionStorage.local.get({ googleApiConnectedAt: 0 });
-  if (googleApiConnectedAt) $('#deepSearch').click();
+  if (phoneParam.length >= 8) {
+    $('#deepPhone').value = phoneParam;
+    if (googleApiConnectedAt) $('#deepSearch').click();
+  }
+  if (restoredRecordQuery) {
+    $('#realtimeRecordId').value = restoredRecordQuery;
+    $('#realtimeTab').click();
+    if (googleApiConnectedAt) $('#realtimeSearch').click();
+  }
 })();
 // 分区标题改名：和交接报告的“人员/号码”标签同一套交互，只存本机。
 $('#deepResults').addEventListener('focusout', async event => {
@@ -1452,7 +1639,7 @@ async function analyzeReports(token, base, sheetTitle, regionRows, provider, api
   return { analyzed: reports.filter(row => row?.[0]).length - failedRows.length, updated: updates.length, failedRows, totalReports: reports.filter(row => row?.[0]).length, address };
 }
 
-async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusText, aDateValue, personnelId, fromColumnA = null) {
+async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusText, aDateValue, personnelId, fromColumnA = null, transferGroup = 'group1') {
   const spreadsheetId = parseSpreadsheetId(targetUrl);
   const sheetTitle = targetTab || 'Sheet1';
   const sheet = quoteSheet(sheetTitle);
@@ -1460,12 +1647,13 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
   const { formTransferCommitted: committed } = await extensionStorage.local.get({ formTransferCommitted: null });
   // A committed marker means this exact selection was already written to this
   // sheet during an interrupted run: never write the same rows twice.
-  const reusable = committed?.sourceText === text && committed.spreadsheetId === spreadsheetId && committed.sheetTitle === sheetTitle ? committed : null;
+  const profileKey = transferGroup === 'group2' ? 'group2-fixed-column-map-v1' : 'group1';
+  const reusable = committed?.sourceText === text && committed.spreadsheetId === spreadsheetId && committed.sheetTitle === sheetTitle && (committed.profileKey || 'group1') === profileKey ? committed : null;
   const metadata = await sheetsRequest(token, `${base}?fields=sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))`);
   const sheetInfo = metadata.sheets?.map(item => item.properties).find(item => item.title === sheetTitle);
   if (!sheetInfo) throw new Error(`找不到目标分表“${sheetTitle}”。`);
   const hasData = row => row?.some(value => value !== '' && value !== null && value !== undefined);
-  const values = parseTsv(text, fromColumnA).map(row => row.map(stripNumericTextMarker))
+  const values = parseTransferValues(text, transferGroup, fromColumnA).map(row => row.map(stripNumericTextMarker))
     // Fully blank source lines must not consume a destination slot.
     .filter(row => row.some(value => String(value ?? '').trim() !== ''));
   const nonEmptyCells = values.reduce((total, row) => total + row.filter(value => value !== '').length, 0);
@@ -1502,7 +1690,7 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
     await sheetsRequest(token, `${base}/values/${writeRange}?valueInputOption=RAW`, {
       method: 'PUT', body: JSON.stringify({ range: `${sheet}!C${startRow}:BM${startRow + rowCount - 1}`, majorDimension: 'ROWS', values })
     });
-    await extensionStorage.local.set({ formTransferCommitted: { sourceText: text, spreadsheetId, sheetTitle, startRow, rowCount, committedAt: Date.now() } });
+    await extensionStorage.local.set({ formTransferCommitted: { sourceText: text, spreadsheetId, sheetTitle, profileKey, startRow, rowCount, committedAt: Date.now() } });
     setStep(3, 3);
     log(`已按原位置重新写入目标 C:BM 第 ${startRow}～${startRow + rowCount - 1} 行。`, 'success');
   } else if (reusable) {
@@ -1561,7 +1749,7 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
     });
     // Persist right after the write succeeds: if any later step fails, a rerun
     // must resume from this point instead of duplicating the block.
-    await extensionStorage.local.set({ formTransferCommitted: { sourceText: text, spreadsheetId, sheetTitle, startRow, rowCount: values.length, committedAt: Date.now() } });
+    await extensionStorage.local.set({ formTransferCommitted: { sourceText: text, spreadsheetId, sheetTitle, profileKey, startRow, rowCount: values.length, committedAt: Date.now() } });
     setStep(3, 3);
     log('已写入目标 C:BM 第 ' + startRow + '～' + (startRow + rowCount - 1) + ' 行。', 'success');
   }
@@ -1618,10 +1806,11 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
   return { startRow, rowCount };
 }
 
-extensionStorage.sync.get({ targetUrl: '', targetTab: '', statusText: '', aDateValue: '', personnelId: '', groupTab: '', handoffStrictCity: false }).then(async values => {
+extensionStorage.sync.get({ targetUrl: '', targetTab: '', statusText: '', aDateValue: '', personnelId: '', groupTab: '', transferGroup: 'group1', realtimeRecordUrl: '', realtimeRecordTab: '' }).then(async values => {
   const groupTab = values.groupTab || '';
   const personnelId = values.personnelId || '';
-  $('#targetUrl').value = values.targetUrl; $('#targetTab').value = values.targetTab; $('#statusText').value = values.statusText; $('#aDateValue').value = values.aDateValue; $('#personnelId').value = personnelId; $('#groupTab').value = groupTab; $('#handoffStrictCity').checked = !!values.handoffStrictCity;
+  $('#targetUrl').value = values.targetUrl; $('#targetTab').value = values.targetTab; $('#statusText').value = values.statusText; $('#aDateValue').value = values.aDateValue; $('#personnelId').value = personnelId; $('#groupTab').value = groupTab; $('#transferGroup').value = values.transferGroup === 'group2' ? 'group2' : 'group1'; $('#realtimeRecordUrl').value = values.realtimeRecordUrl || ''; $('#realtimeRecordTab').value = values.realtimeRecordTab || '';
+  updateTransferGroupVisual();
 });
 extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', regionTab: '', regionConfigCache: null, googleApiConnectedAt: 0 }).then(values => {
   const groqApiKeys = values.groqApiKeys?.length ? values.groqApiKeys : (values.groqApiKey ? [values.groqApiKey] : []);
@@ -1670,7 +1859,8 @@ $('#authorize').onclick = async () => {
 };
 
 $('#save').onclick = async () => {
-  const targetUrl = $('#targetUrl').value.trim(); const targetTab = $('#targetTab').value.trim(); const statusText = $('#statusText').value.trim(); const aDateValue = $('#aDateValue').value; const groupTab = $('#groupTab').value.trim();
+  const transferGroup = $('#transferGroup').value;
+  const targetUrl = $('#targetUrl').value.trim(); const targetTab = $('#targetTab').value.trim(); const statusText = $('#statusText').value.trim(); const aDateValue = $('#aDateValue').value; const groupTab = $('#groupTab').value.trim(); const realtimeRecordUrl = $('#realtimeRecordUrl').value.trim(); const realtimeRecordTab = $('#realtimeRecordTab').value.trim();
   const personnelId = $('#personnelId').value.trim();
   const llmProvider = $('#llmProvider').value; const llmKeys = $('#llmKey').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   const regionTab = $('#regionTab').value.trim();
@@ -1682,12 +1872,15 @@ $('#save').onclick = async () => {
   if (!aDateValue) { $('#saveStatus').textContent = '请选择 A 列日期/时间'; $('#saveStatus').style.color = '#c5221f'; return; }
   if (!regionTab) { $('#saveStatus').textContent = '请填写地区配置分表名称'; $('#saveStatus').style.color = '#c5221f'; return; }
   if (!llmKeys.length) { $('#saveStatus').textContent = '请填写 API Key'; $('#saveStatus').style.color = '#c5221f'; return; }
-  await extensionStorage.sync.set({ targetUrl, targetTab, statusText, aDateValue, personnelId, groupTab, handoffStrictCity: $('#handoffStrictCity').checked });
+  if (realtimeRecordUrl && !realtimeRecordUrl.startsWith('https://docs.google.com/spreadsheets/')) { $('#saveStatus').textContent = '请输入有效的实时记录表网址'; $('#saveStatus').style.color = '#c5221f'; return; }
+  if (realtimeRecordUrl && !realtimeRecordTab) { $('#saveStatus').textContent = '请填写实时记录表分表名称'; $('#saveStatus').style.color = '#c5221f'; return; }
+  if (realtimeRecordTab && !realtimeRecordUrl) { $('#saveStatus').textContent = '请填写实时记录表网址'; $('#saveStatus').style.color = '#c5221f'; return; }
+  await extensionStorage.sync.set({ targetUrl, targetTab, statusText, aDateValue, personnelId, groupTab, transferGroup, realtimeRecordUrl, realtimeRecordTab });
   await extensionStorage.local.set({ groqApiKey: llmProvider === 'groq' ? llmKeys[0] : '', groqApiKeys: llmProvider === 'groq' ? llmKeys : [], geminiApiKey: llmProvider === 'gemini' ? llmKeys[0] : '', llmProvider, regionTab });
   $('#saveStatus').textContent = '配置已保存'; $('#saveStatus').style.color = '#188038'; log(`目标位置已保存：${targetTab || '默认分表'}`, 'success');
 };
 
-const syncConfigKeys = ['targetUrl', 'targetTab', 'statusText', 'aDateValue', 'personnelId', 'groupTab', 'handoffStrictCity'];
+const syncConfigKeys = ['targetUrl', 'targetTab', 'statusText', 'aDateValue', 'personnelId', 'groupTab', 'transferGroup', 'realtimeRecordUrl', 'realtimeRecordTab'];
 const localConfigKeys = ['groqApiKey', 'groqApiKeys', 'geminiApiKey', 'llmProvider', 'regionTab', 'reportLabels'];
 $('#exportConfig').onclick = async () => {
   const syncValues = await extensionStorage.sync.get(syncConfigKeys);
@@ -1713,8 +1906,8 @@ $('#configFile').onchange = async event => {
 };
 $('#clearConfig').onclick = async () => {
   if (!window.confirm('确定清除所有配置、API Key、报告历史和本地缓存吗？此操作不可撤销。')) return;
-  await extensionStorage.sync.remove(syncConfigKeys);
-  await extensionStorage.local.remove([...localConfigKeys, 'handoffHistory', 'regionConfigCache', 'regionConfigLastCheckedAt', 'regionConfigLastCheckRows', 'googleApiConnectedAt', 'formTransferSource', 'formTransferCommitted']);
+  await extensionStorage.sync.remove([...syncConfigKeys, 'handoffStrictCity']);
+  await extensionStorage.local.remove([...localConfigKeys, 'handoffHistory', 'regionConfigCache', 'regionConfigLastCheckedAt', 'regionConfigLastCheckRows', 'googleApiConnectedAt', 'formTransferSource', 'formTransferCommitted', 'realtimeLastQueries']);
   if (extensionStorage.session) await extensionStorage.session.remove(['webAccessToken', 'webTokenExpiresAt']);
   window.alert('配置已清除，页面将重新加载。'); location.reload();
 };
@@ -1729,7 +1922,10 @@ $('#start').onclick = async () => {
     window.alert(message);
     return;
   }
-  const previewValues = parseTsv(formTransferSource.text);
+  const transferGroup = $('#transferGroup').value === 'group2' ? 'group2' : 'group1';
+  let previewValues;
+  try { previewValues = parseTransferValues(formTransferSource.text, transferGroup); }
+  catch (error) { log(error.message || String(error), 'error'); window.alert(error.message || String(error)); return; }
   const previewNonEmpty = previewValues.reduce((total, row) => total + row.filter(value => value !== '').length, 0);
   if (previewValues.length < 2 && previewNonEmpty < 2) {
     const message = '只读取到 1 个单元格，疑似没有复制当前整行。请回到 A 表选择整行并按 Ctrl+C。';
@@ -1740,15 +1936,19 @@ $('#start').onclick = async () => {
   if (!$('#aDateValue').value) { log('尚未选择 A 列日期/时间，请先在右侧配置。', 'error'); window.alert('请先选择 A 列日期/时间。'); return; }
   if (!$('#regionTab').value.trim()) { log('尚未填写地区配置分表名称，请先在右侧配置。', 'error'); window.alert('请先填写地区配置分表名称。'); return; }
   if (!$('#groupTab').value.trim()) { log('尚未填写群组配置分表名称，请先在右侧配置。', 'error'); window.alert('请先填写群组配置分表名称。'); return; }
-  // 整行复制（从 A 列开始）是常规操作：识别成功就直接静默通过，不再每次弹窗。
-  // 只有检测到“从 B 列开始”这种异常选区时，才弹出写入前确认让用户核对，
-  // 因为那种情况若直接写入会让所有数据整体右移一列。
+  // 组别1整行复制（从 A 列开始）识别成功就直接静默通过；
+  // 组别2也使用自动起始列判断，始终不弹出确认框。
   let startColumnChoice;
-  if (formTransferSource.text.replace(/\r/g, '').split('\n').some(row => row.split('\t').length >= COLUMN_COUNT + 1)) {
+  const fullRowStartsAtA = formTransferSource.text.replace(/\r/g, '').split('\n').some(row => row.split('\t').length >= COLUMN_COUNT + 1);
+  const group2StartsAtA = rawTsvRows(formTransferSource.text).some(row => row.length === sheetColumnNumber('AT') || row.length >= COLUMN_COUNT + 1);
+  if (transferGroup === 'group2') {
+    startColumnChoice = group2StartsAtA;
+    log(`已自动识别组别2：按“从 ${startColumnChoice ? 'A' : 'B'} 列开始”处理，不弹出写入前确认。`);
+  } else if (fullRowStartsAtA) {
     startColumnChoice = true;
     log('已自动识别：整行复制、从 A 列开始对齐到目标 C 列（跳过写入前确认）。');
   } else {
-    startColumnChoice = await showTransferPreview(formTransferSource.text);
+    startColumnChoice = await showTransferPreview(formTransferSource.text, transferGroup);
     if (startColumnChoice === null) { log('已取消本次转交，未写入任何数据。'); $('#heroText').textContent = '已取消，等待下一次转交。'; return; }
   }
   const runStartedAt = performance.now();
@@ -1762,7 +1962,7 @@ $('#start').onclick = async () => {
       await extensionStorage.local.set({ googleApiConnectedAt: Date.now() });
       $('#connectionDot').parentElement.classList.add('ok'); $('#connectionText').textContent = 'Google API 已授权'; log('Google 授权成功。', 'success');
       setStep(2, 2); log('正在读取目标分表 C:BM，查找最后一条数据。');
-      const result = await transferWithSheetsApi(text, token, $('#targetUrl').value.trim(), $('#targetTab').value.trim(), $('#statusText').value.trim(), $('#aDateValue').value, $('#personnelId').value.trim(), startColumnChoice);
+      const result = await transferWithSheetsApi(text, token, $('#targetUrl').value.trim(), $('#targetTab').value.trim(), $('#statusText').value.trim(), $('#aDateValue').value, $('#personnelId').value.trim(), startColumnChoice, transferGroup);
       const { groqApiKey, groqApiKeys = [], geminiApiKey, llmProvider = 'groq', regionTab = '' } = await extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', regionTab: '' });
       const llmKeys = llmProvider === 'gemini' ? [geminiApiKey].filter(Boolean) : (groqApiKeys.length ? groqApiKeys : [groqApiKey].filter(Boolean));
       if (!llmKeys.length) throw new Error(`尚未配置 ${llmProvider === 'gemini' ? 'Gemini' : 'Groq'} API Key，请在右侧配置后重试。`);
@@ -1819,6 +2019,15 @@ const updateRetryFailedButton = rows => {
   else button.hidden = true;
 };
 extensionStorage.local.get({ llmRetryQueue: null }).then(({ llmRetryQueue }) => updateRetryFailedButton(llmRetryQueue?.rows));
+const updateTransferGroupVisual = () => {
+  const select = $('#transferGroup');
+  select.classList.toggle('source-africa', select.value === 'group1');
+  select.classList.toggle('source-europe', select.value === 'group2');
+  const banner = $('#heroBanner');
+  if (banner) banner.src = select.value === 'group2' ? 'assets/team-france-banner.png' : 'assets/team-africa-banner.png';
+};
+$('#transferGroup').addEventListener('change', updateTransferGroupVisual);
+updateTransferGroupVisual();
 $('#retryFailedRows').onclick = async () => {
   const button = $('#retryFailedRows');
   const { llmRetryQueue: queue } = await extensionStorage.local.get({ llmRetryQueue: null });
