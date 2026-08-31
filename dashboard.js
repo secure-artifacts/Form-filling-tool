@@ -48,6 +48,24 @@ const formatDuration = milliseconds => {
   return `${minutes} 分 ${(seconds % 60).toFixed(1)} 秒`;
 };
 
+const openAppDialog = ({ message, confirm = false, danger = false, confirmLabel = '确定', cancelLabel = '取消' }) => new Promise(resolve => {
+  const overlay = document.createElement('div'); overlay.className = 'app-dialog-backdrop';
+  const card = document.createElement('div'); card.className = 'app-dialog'; card.setAttribute('role', 'dialog'); card.setAttribute('aria-modal', 'true');
+  const title = document.createElement('h3'); title.className = 'app-dialog-title'; title.textContent = '扩展程序表格转交提示：';
+  const body = document.createElement('p'); body.className = 'app-dialog-message'; body.textContent = message;
+  const actions = document.createElement('div'); actions.className = 'app-dialog-actions';
+  const close = value => { overlay.remove(); document.removeEventListener('keydown', onKeyDown); resolve(value); };
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'app-dialog-cancel'; cancel.textContent = cancelLabel; cancel.onclick = () => close(false);
+  const ok = document.createElement('button'); ok.type = 'button'; ok.className = danger ? 'app-dialog-primary danger' : 'app-dialog-primary'; ok.textContent = confirm ? confirmLabel : '知道了'; ok.onclick = () => close(true);
+  const onKeyDown = event => { if (event.key === 'Escape' && confirm) close(false); if (event.key === 'Enter') close(true); };
+  if (confirm) actions.append(cancel, ok); else actions.append(ok);
+  card.append(title, body, actions); overlay.append(card); document.body.append(overlay);
+  overlay.onclick = event => { if (event.target === overlay) close(confirm ? false : true); };
+  document.addEventListener('keydown', onKeyDown); ok.focus();
+});
+const openAppNotice = message => openAppDialog({ message });
+const openAppConfirm = (message, danger = false, labels = {}) => openAppDialog({ message, confirm: true, danger, ...labels });
+
 const parseSpreadsheetId = value => {
   const match = value.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
   if (!match) throw new Error('目标表格网址中没有找到 Spreadsheet ID。');
@@ -617,7 +635,7 @@ async function rebuildReportsFromTarget() {
 $('#rematchAllReports').onclick = () => { void refreshAllReportMatches(); };
 $('#rebuildReports').onclick = () => { void rebuildReportsFromTarget(); };
 $('#clearHandoffHistory').onclick = async () => {
-  if (!window.confirm('确定清空本机保存的全部交接报告历史和当前报告显示吗？此操作不可撤销。')) return;
+  if (!await openAppConfirm('确定清空本机保存的全部交接报告历史和当前报告显示吗？此操作不可撤销。', true)) return;
   await extensionStorage.local.remove('handoffHistory');
   currentHandoffResults = [];
   displayedHandoffResults = [];
@@ -1367,7 +1385,7 @@ $('#realtimeRecordId').addEventListener('keydown', event => { if (event.key === 
   const incomingRecordQueries = parseRealtimeQueries(recordParam);
   let restoredRecordQuery = recordParam || savedRecordQueries.join('\n');
   if (incomingRecordQueries.length && savedRecordQueries.length && incomingRecordQueries.join('\n') !== savedRecordQueries.join('\n')) {
-    const append = window.confirm('已有实时记录查询。点击“确定”追加新号码/ID；点击“取消”全部覆盖。');
+    const append = await openAppConfirm('已有实时记录查询，请选择如何处理新号码/ID。', false, { confirmLabel: '追加', cancelLabel: '覆盖' });
     restoredRecordQuery = (append ? [...savedRecordQueries, ...incomingRecordQueries] : incomingRecordQueries)
       .filter((item, index, values) => values.indexOf(item) === index).join('\n');
   }
@@ -1900,16 +1918,16 @@ $('#configFile').onchange = async event => {
     const syncValues = Object.fromEntries(syncConfigKeys.filter(key => Object.hasOwn(payload.sync, key)).map(key => [key, payload.sync[key]]));
     const localValues = Object.fromEntries(localConfigKeys.filter(key => Object.hasOwn(payload.local, key)).map(key => [key, payload.local[key]]));
     await extensionStorage.sync.set(syncValues); await extensionStorage.local.set(localValues);
-    window.alert('配置导入成功，页面将重新加载。'); location.reload();
-  } catch (error) { window.alert(`配置导入失败：${error.message || error}`); }
+    await openAppNotice('配置导入成功，页面将重新加载。'); location.reload();
+  } catch (error) { await openAppNotice(`配置导入失败：${error.message || error}`); }
   event.target.value = '';
 };
 $('#clearConfig').onclick = async () => {
-  if (!window.confirm('确定清除所有配置、API Key、报告历史和本地缓存吗？此操作不可撤销。')) return;
+  if (!await openAppConfirm('确定清除所有配置、API Key、报告历史和本地缓存吗？此操作不可撤销。', true)) return;
   await extensionStorage.sync.remove([...syncConfigKeys, 'handoffStrictCity']);
   await extensionStorage.local.remove([...localConfigKeys, 'handoffHistory', 'regionConfigCache', 'regionConfigLastCheckedAt', 'regionConfigLastCheckRows', 'googleApiConnectedAt', 'formTransferSource', 'formTransferCommitted', 'realtimeLastQueries']);
   if (extensionStorage.session) await extensionStorage.session.remove(['webAccessToken', 'webTokenExpiresAt']);
-  window.alert('配置已清除，页面将重新加载。'); location.reload();
+  await openAppNotice('配置已清除，页面将重新加载。'); location.reload();
 };
 
 $('#clearLog').onclick = () => { $('#logs').innerHTML = ''; log('日志已清空。'); };
@@ -1919,23 +1937,23 @@ $('#start').onclick = async () => {
     const message = '未检测到本次选区数据。请先回到 A 表选择整行，按 Ctrl+C 复制，再右键点击“转交表格”。';
     log(message, 'error');
     $('#heroText').textContent = '操作已阻止：请先复制 A 表选中的整行。';
-    window.alert(message);
+    await openAppNotice(message);
     return;
   }
   const transferGroup = $('#transferGroup').value === 'group2' ? 'group2' : 'group1';
   let previewValues;
   try { previewValues = parseTransferValues(formTransferSource.text, transferGroup); }
-  catch (error) { log(error.message || String(error), 'error'); window.alert(error.message || String(error)); return; }
+  catch (error) { log(error.message || String(error), 'error'); await openAppNotice(error.message || String(error)); return; }
   const previewNonEmpty = previewValues.reduce((total, row) => total + row.filter(value => value !== '').length, 0);
   if (previewValues.length < 2 && previewNonEmpty < 2) {
     const message = '只读取到 1 个单元格，疑似没有复制当前整行。请回到 A 表选择整行并按 Ctrl+C。';
-    log(message, 'error'); $('#heroText').textContent = '操作已阻止：没有检测到完整选区。'; window.alert(message); return;
+    log(message, 'error'); $('#heroText').textContent = '操作已阻止：没有检测到完整选区。'; await openAppNotice(message); return;
   }
   if (!$('#targetUrl').value.trim()) { log('尚未配置目标表格网址。', 'error'); return; }
-  if (!$('#statusText').value.trim()) { log('尚未填写 E 列状态，请先在右侧配置。', 'error'); window.alert('请先填写 E 列状态。'); return; }
-  if (!$('#aDateValue').value) { log('尚未选择 A 列日期/时间，请先在右侧配置。', 'error'); window.alert('请先选择 A 列日期/时间。'); return; }
-  if (!$('#regionTab').value.trim()) { log('尚未填写地区配置分表名称，请先在右侧配置。', 'error'); window.alert('请先填写地区配置分表名称。'); return; }
-  if (!$('#groupTab').value.trim()) { log('尚未填写群组配置分表名称，请先在右侧配置。', 'error'); window.alert('请先填写群组配置分表名称。'); return; }
+  if (!$('#statusText').value.trim()) { log('尚未填写 E 列状态，请先在右侧配置。', 'error'); await openAppNotice('请先填写 E 列状态。'); return; }
+  if (!$('#aDateValue').value) { log('尚未选择 A 列日期/时间，请先在右侧配置。', 'error'); await openAppNotice('请先选择 A 列日期/时间。'); return; }
+  if (!$('#regionTab').value.trim()) { log('尚未填写地区配置分表名称，请先在右侧配置。', 'error'); await openAppNotice('请先填写地区配置分表名称。'); return; }
+  if (!$('#groupTab').value.trim()) { log('尚未填写群组配置分表名称，请先在右侧配置。', 'error'); await openAppNotice('请先填写群组配置分表名称。'); return; }
   // 组别1整行复制（从 A 列开始）识别成功就直接静默通过；
   // 组别2也使用自动起始列判断，始终不弹出确认框。
   let startColumnChoice;
