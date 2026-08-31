@@ -1525,7 +1525,7 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
       const insertCount = Math.max(values.length - availableRows, 0);
       if (insertCount) {
         if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法增加目标表行数。');
-        await sheetsRequest(token, base + '/values:batchUpdate', {
+        await sheetsRequest(token, base + ':batchUpdate', {
           method: 'POST',
           body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: gridRowCount, endIndex: gridRowCount + insertCount } }] })
         });
@@ -1558,7 +1558,7 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
       const insertCount = Math.max(values.length - availableRows, 0);
       if (insertCount) {
         if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法在数据块前增加行。');
-        await sheetsRequest(token, base + '/values:batchUpdate', {
+        await sheetsRequest(token, base + ':batchUpdate', {
           method: 'POST',
           body: JSON.stringify({ requests: [{ insertDimension: { sheetId: sheetInfo.sheetId, dimension: 'ROWS', startIndex: boundaryIndex, endIndex: boundaryIndex + insertCount } }] })
         });
