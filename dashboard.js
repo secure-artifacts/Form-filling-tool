@@ -63,6 +63,13 @@ const parseTsv = (text, fromColumnA = null) => {
   const offset = startsAtA ? 1 : 0;
   return rawRows.map(row => row.slice(offset, offset + COLUMN_COUNT).map(cell => String(cell).replace(/\uE000/g, '\n')).concat(Array(COLUMN_COUNT).fill('')).slice(0, COLUMN_COUNT));
 };
+const stripNumericTextMarker = value => {
+  if (typeof value !== 'string') return value;
+  const marker = value.match(/^[\s\u200B\uFEFF]*(?:['’‘＇ʼ]+\s*)+/);
+  if (!marker) return value;
+  const unquoted = value.slice(marker[0].length).trim();
+  return /^[+-]?(?=.*\d)[\d\s.,:/-]+$/.test(unquoted) ? unquoted : value;
+};
 
 const sheetColumnName = number => {
   let name = '';
@@ -1458,16 +1465,9 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
   const sheetInfo = metadata.sheets?.map(item => item.properties).find(item => item.title === sheetTitle);
   if (!sheetInfo) throw new Error(`找不到目标分表“${sheetTitle}”。`);
   const hasData = row => row?.some(value => value !== '' && value !== null && value !== undefined);
-  const values = parseTsv(text, fromColumnA).map(row => row.map(value => {
-    if (typeof value !== 'string') return value;
-    const trimmed = value.trim();
-    if (!/^['’]/.test(trimmed)) return value;
-    const unquoted = trimmed.slice(1).trim();
-    const numericLike = /^[+-]?(?=.*\d)[\d\s.,:/-]+$/.test(unquoted);
-    return numericLike ? unquoted : value;
-    // Fully blank source lines must not consume a destination slot (and
-    // would split the bottom data block for the next run's positioning).
-  })).filter(row => row.some(value => String(value ?? '').trim() !== ''));
+  const values = parseTsv(text, fromColumnA).map(row => row.map(stripNumericTextMarker))
+    // Fully blank source lines must not consume a destination slot.
+    .filter(row => row.some(value => String(value ?? '').trim() !== ''));
   const nonEmptyCells = values.reduce((total, row) => total + row.filter(value => value !== '').length, 0);
   if (!nonEmptyCells) throw new Error('源选区没有读到 B:BL 内容，请确认选择整行后按 Ctrl+C。');
   log(`源选区解析为 ${values.length} 行、${nonEmptyCells} 个非空单元格。`);
