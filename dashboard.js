@@ -14,7 +14,8 @@ const stepPhases = [
 const STEP_COUNT = stepPhases.reduce((total, phase) => total + phase.steps.length, 0);
 let state = { active: -1, done: 0 };
 const COLUMN_COUNT = 63; // B through BL, inclusive.
-const DATA_START_ROW = 3; // Rows 1-2 are permanent headers in the target sheet.
+const DATA_START_ROW = 3; // Group1 keeps rows 1-2 as permanent headers.
+const GROUP2_DATA_START_ROW = 4; // Group2 keeps rows 1-3 as permanent headers.
 const GOOGLE_CLIENT_ID = '357885944577-8agplpmrpruj17lihal2eaatfr0hfhu3.apps.googleusercontent.com';
 const GOOGLE_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 let webAccessToken = '';
@@ -287,6 +288,23 @@ async function sheetsRequest(token, url, init = {}) {
 
 const readValues = (token, base, range) => sheetsRequest(token, `${base}/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE`);
 const readFormattedValues = (token, base, range) => sheetsRequest(token, `${base}/values/${encodeURIComponent(range)}?majorDimension=ROWS&valueRenderOption=FORMATTED_VALUE`);
+const readRowsWithHyperlinks = async (token, base, range) => {
+  const [valueResponse, gridResponse] = await Promise.all([
+    readValues(token, base, range),
+    sheetsRequest(token, `${base}?includeGridData=true&ranges=${encodeURIComponent(range)}&fields=${encodeURIComponent('sheets(data(rowData(values(hyperlink,textFormatRuns(format(link(uri)))))))')}`)
+  ]);
+  const valueRows = valueResponse.values || [];
+  const gridRows = gridResponse.sheets?.[0]?.data?.[0]?.rowData || [];
+  const rowCount = Math.max(valueRows.length, gridRows.length);
+  return Array.from({ length: rowCount }, (_, rowIndex) => {
+    const row = [...(valueRows[rowIndex] || [])];
+    for (const [columnIndex, cell] of (gridRows[rowIndex]?.values || []).entries()) {
+      const link = cell?.hyperlink || cell?.textFormatRuns?.map(run => run.format?.link?.uri).find(Boolean);
+      if (link) row[columnIndex] = link;
+    }
+    return row;
+  });
+};
 const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, ' ').trim();
 const unique = values => [...new Set(values.filter(Boolean))];
 const normalizePhoneUrl = value => {
@@ -482,7 +500,7 @@ async function refreshHandoffMatch(item) {
   // J1:Y 一次读齐（下标：J=0 … P=6 Q=7 … W=13 X=14 Y=15）。
   const [targetBlock, groups] = await Promise.all([
     readValues(token, base, `${target}!J1:Y`),
-    readValues(token, base, `${lookup}!A:I`)
+    readRowsWithHyperlinks(token, base, `${lookup}!A:I`)
   ]);
   const rows = targetBlock.values || [];
   const wantedDigits = String(item.phoneUrl || '').replace(/\D/g, '');
@@ -492,7 +510,7 @@ async function refreshHandoffMatch(item) {
   }
   if (hitIndex < 0) throw new Error('目标分表 Q 列里没有找到这个号码——人员可能已被删除或改号。');
   const row = rows[hitIndex] || [];
-  const { found, source } = findGroupRow(groups.values || [], row[13] || '', row[14] || '', row[15] || '');
+  const { found, source } = findGroupRow(groups, row[13] || '', row[14] || '', row[15] || '');
   return { ...item, row: hitIndex + 1, submitter: row[0] || '', reportGroup: found?.[7] || '', callGroup: found?.[8] || '', source };
 }
 async function refreshAllReportMatches() {
@@ -585,10 +603,10 @@ async function rebuildReportsFromTarget() {
     const lookup = quoteSheet(config.groupTab);
     const [targetData, groups] = await Promise.all([
       readValues(token, base, target + '!C3:Y'),
-      readValues(token, base, lookup + '!A:I')
+      readRowsWithHyperlinks(token, base, lookup + '!A:I')
     ]);
     const rows = targetData.values || [];
-    const groupRows = groups.values || [];
+    const groupRows = groups;
     const results = [];
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index] || [];
@@ -673,9 +691,9 @@ async function buildHandoffReport(token, base, targetTab, groupTab, startRow, ro
     readValues(token, base, `${target}!Q${startRow}:Q${startRow + rowCount - 1}`),
     readValues(token, base, `${target}!C${startRow}:C${startRow + rowCount - 1}`),
     readValues(token, base, `${target}!J${startRow}:J${startRow + rowCount - 1}`),
-    readValues(token, base, `${lookup}!A:I`)
+    readRowsWithHyperlinks(token, base, `${lookup}!A:I`)
   ]);
-  const locations = location.values || []; const brebisValues = brebis.values || []; const phoneValues = phone.values || []; const dateValues = dates.values || []; const submitterValues = submitters.values || []; const groupRows = groups.values || [];
+  const locations = location.values || []; const brebisValues = brebis.values || []; const phoneValues = phone.values || []; const dateValues = dates.values || []; const submitterValues = submitters.values || []; const groupRows = groups;
   const results = [];
   for (let index = 0; index < rowCount; index++) {
     const row = locations[index] || [];
@@ -1181,7 +1199,7 @@ $('#deepSearch').onclick = async () => {
     const lookup = hasGroupTab ? quoteSheet(config.groupTab) : '';
     const [targetData, groups] = await Promise.all([
       readValues(token, base, `${target}!C1:Y`),
-      lookup ? readValues(token, base, `${lookup}!A:O`) : Promise.resolve({ values: [] })
+      lookup ? readRowsWithHyperlinks(token, base, `${lookup}!A:O`) : Promise.resolve([])
     ]);
     const rows = targetData.values || [];
     const knownPhones = rows.map(row => deepPhoneDigits(row?.[14])).filter(Boolean);
@@ -1196,7 +1214,7 @@ $('#deepSearch').onclick = async () => {
       let matchSource = ''; let followUp = ''; let ownerGroup = ''; let ownerGroupLink = ''; let g1300 = ''; let g1800 = ''; let g2130 = '';
       let statusKind = country || province || city ? 'unmatched' : 'missing-address';
       if (lookup && (country || province || city)) {
-        const { found, source } = findGroupRow(groups.values || [], country, province, city);
+        const { found, source } = findGroupRow(groups, country, province, city);
         matchSource = source;
         if (found) {
           followUp = found[4] || ''; ownerGroup = found[5] || ''; ownerGroupLink = found[6] || '';
@@ -1641,6 +1659,9 @@ async function analyzeReports(token, base, sheetTitle, regionRows, provider, api
     const setIfBlank = (column, offset, value) => {
       if (value !== '' && (current[offset] === undefined || current[offset] === null || current[offset] === '')) updates.push({ range: `${sheet}!${column}${startRow + index}`, majorDimension: 'ROWS', values: [[value]] });
     };
+    const setFromReport = (column, offset, value) => {
+      if (value !== '' && String(current[offset] ?? '') !== String(value)) updates.push({ range: `${sheet}!${column}${startRow + index}`, majorDimension: 'ROWS', values: [[value]] });
+    };
     const age = parsed.age === null || parsed.age === undefined ? '' : String(parsed.age).replace(/[^0-9]/g, '');
     const professionCandidate = String(parsed.profession_zh || '').trim();
     const profession = /[\u4e00-\u9fff]/.test(professionCandidate) ? professionCandidate : '';
@@ -1652,7 +1673,7 @@ async function analyzeReports(token, base, sheetTitle, regionRows, provider, api
     setDropdownIfMissingOrInvalid('W', 4, countryDropdown, dropdown.W);
     setDropdownIfMissingOrInvalid('X', 5, provinceDropdown, dropdown.X);
     setDropdownIfMissingOrInvalid('Y', 6, cityDropdown, dropdown.Y);
-    setIfBlank('Z', 7, profession);
+    setFromReport('Z', 7, profession);
     setIfBlank('AA', 8, addressText);
     setDropdownIfMissingOrInvalid('AJ', 17, category, categoryOptions);
     log(`第 ${startRow + index} 行：年龄=${age || '未识别'}，职业=${profession || '未识别'}，地址=${addressText || '未识别'}，类别=${category || '未识别'}，AI类别=${parsed.category || '无'}，AJ选项=${categoryOptions.length}，国家=${countryDropdown || '未匹配下拉项'}，省州=${provinceDropdown || '未匹配下拉项'}，市区=${cityDropdown || '未匹配下拉项'}。`);
@@ -1667,6 +1688,7 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
   const spreadsheetId = parseSpreadsheetId(targetUrl);
   const sheetTitle = targetTab || 'Sheet1';
   const sheet = quoteSheet(sheetTitle);
+  const dataStartRow = transferGroup === 'group2' ? GROUP2_DATA_START_ROW : DATA_START_ROW;
   const base = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}`;
   const { formTransferCommitted: committed } = await extensionStorage.local.get({ formTransferCommitted: null });
   // A committed marker means this exact selection was already written to this
@@ -1743,11 +1765,11 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
     const current = await sheetsRequest(token, base + '/values/' + encodeURIComponent(sheet + '!A:BM') + '?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE');
     const rows = current.values || [];
     const gridRowCount = Number(sheetInfo.gridProperties?.rowCount || 0);
-    const firstDataIndex = rows.findIndex((row, index) => index >= DATA_START_ROW - 1 && hasData(row));
+    const firstDataIndex = rows.findIndex((row, index) => index >= dataStartRow - 1 && hasData(row));
     if (firstDataIndex < 0) {
       // An empty sheet starts at the first data row; only grow the grid if
       // that range does not exist yet.
-      const availableRows = Math.max(gridRowCount - DATA_START_ROW + 1, 0);
+      const availableRows = Math.max(gridRowCount - dataStartRow + 1, 0);
       const insertCount = Math.max(values.length - availableRows, 0);
       if (insertCount) {
         if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法增加目标表行数。');
@@ -1757,13 +1779,13 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
         });
         log('目标表行数不足，已在底部增加 ' + insertCount + ' 行。', 'success');
       }
-      startRow = DATA_START_ROW;
+      startRow = dataStartRow;
     } else {
       // Only use the empty area between the headers and the first data row.
       // Anything below that first data row, including blank separators, is
       // outside the transfer area and must not affect placement.
       let availableEndRow = firstDataIndex; // 1-based row immediately before the first data row.
-      const availableRows = Math.max(firstDataIndex - (DATA_START_ROW - 1), 0);
+      const availableRows = Math.max(firstDataIndex - (dataStartRow - 1), 0);
       const insertCount = Math.max(values.length - availableRows, 0);
       if (insertCount) {
         if (typeof sheetInfo?.sheetId !== 'number') throw new Error('拿不到分表 ID，无法在数据块前增加行。');
