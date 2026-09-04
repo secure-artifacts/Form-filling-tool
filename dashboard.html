@@ -18,7 +18,7 @@
       <div id="workflowView"><div class="card"><div class="section-title"><h3>流程进度</h3><span id="progressText">0 / 13</span></div><div class="phases" id="phases"></div></div>
       <div class="card"><div class="section-title"><h3>执行日志</h3><button id="retryFailedRows" class="link" hidden>重跑上次失败行</button><button id="clearLog" class="link">清空</button></div><div class="logs" id="logs"></div></div></div>
       <div id="reportView" class="card report-view" hidden><div class="section-title"><div><h3>交接报告结果</h3></div><div class="report-tools"><label>按日期查看<select id="reportDateFilter"><option value="">本次结果</option></select></label><span id="reportStatus" class="badge">尚未生成</span><input id="reportRebuildDate" class="report-rebuild-date" type="date" title="留空表示重建全部日期"><button id="rebuildReports" class="secondary report-action-button">从目标表重建</button><button id="clearHandoffHistory" class="secondary report-action-button danger-action">清空历史</button><button id="rematchAllReports" class="secondary report-action-button">一键重新匹配</button><button id="copyAllReports" class="secondary report-action-button">复制全部</button></div></div><div id="reportResults" class="report-results"><div class="empty-report">流程完成后，这里会显示交接报告。</div></div></div>
-      <div id="deepView" class="card deep-view" hidden><div class="section-title"><div><h3>深度查询</h3><p class="report-subtitle">输入手机号，在目标分表 Q 列定位人员并取出地址；再到群组配置分表按地址精确匹配那一行，返回跟进人员(E)、所属群组(F)、群组表格链接(G)与 13h00(J)/18h00(L)/21h30(O) 三个时段群组链接</p></div></div>
+      <div id="deepView" class="card deep-view" hidden><div class="section-title"><div><h3>深度查询</h3><p class="report-subtitle">输入手机号，在目标分表 Q 列定位人员并取出地址；再到群组配置分表按地址精确匹配那一行，返回跟进人员(E)、所属群组(F)、群组表格链接(G)与 13h00(K)/18h00(M)/21h30(P) 三个时段群组链接</p></div></div>
         <div class="deep-tools"><textarea id="deepPhone" rows="2" placeholder="输入或粘贴手机号，每行一个；也支持用空格、逗号、分号或 Tab 分隔（Ctrl+Enter 查询）"></textarea><button id="deepSearch" class="primary">查询</button></div>
         <p id="deepStatus" class="status"></p>
         <div id="deepResults" class="deep-results"><div class="empty-report">输入号码开始查询。</div></div>
@@ -30,7 +30,7 @@
       </div>
       <div id="configView" class="config-view" hidden><div class="card"><div class="section-title"><h3>参数配置</h3><span class="badge">本机保存</span></div>
         <fieldset class="config-group target-config"><legend>转交目标</legend>
-          <label>源数据来源<select id="transferGroup"><option value="group1">队伍1（非）</option><option value="group2">队伍2（欧）</option></select></label>
+          <label>源数据来源<select id="transferGroup"><option value="group1">队伍1（非）</option><option value="group2">队伍2（欧）</option><option value="group3">队伍3（非-独）</option></select></label>
           <label>目标表格网址<input id="targetUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit"></label>
           <label>目标分表名称<input id="targetTab" placeholder="例如：2026年6月"></label>
           <label>A列日期<select id="aDateValue"><option value="">请选择 A 列日期/时间</option><option value="10 a.m.">10 a.m.</option><option value="1 p.m.">1 p.m.</option><option value="6 p.m.">6 p.m.</option><option value="8 p.m.">8 p.m.</option><option value="8:30 p.m.">8:30 p.m.</option><option value="9:30 p.m.">9:30 p.m.</option></select></label>
@@ -42,8 +42,16 @@
           <label>群组配置分表<input id="groupTab" placeholder="请输入群组配置分表名称"></label>
           <p id="regionCacheStatus" class="status">授权后自动读取，之后每天 12:00 检查</p>
           <label>拆解模型<select id="llmProvider"><option value="groq">Groq</option><option value="gemini">Gemini</option></select></label>
+          <label id="llmModelLabel" hidden>Gemini / Gemma 模型<select id="llmModel">
+            <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite（推荐：15 RPM / 500 RPD）</option>
+            <option value="gemini-3.1-flash-lite">Gemini 3.1 Flash Lite（15 RPM / 500 RPD）</option>
+            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite（备用：10 RPM / 20 RPD）</option>
+            <option value="gemini-3.5-flash">Gemini 3.5 Flash（能力更强：5 RPM / 20 RPD）</option>
+            <option value="gemma-4-26b-a4b-it">Gemma 4 26B（推荐高额度：30 RPM / 14.4K RPD）</option>
+            <option value="gemma-4-31b-it">Gemma 4 31B（高额度：30 RPM / 14.4K RPD）</option>
+          </select></label>
           <label id="llmKeyLabel">Groq API Keys（每行一个） <a class="api-key-help" href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer">申请 API Key</a><span class="secret-field"><textarea id="llmKey" rows="4" spellcheck="false" autocomplete="off" placeholder="gsk_...&#10;gsk_..."></textarea><button id="toggleLlmKey" class="secret-toggle" type="button" aria-label="显示 API Key" title="显示 API Key">👁</button></span></label>
-          <p class="tip">Groq 可填写多个 Key，每行一个；遇到限流会自动轮询。Key 只保存在本机扩展存储中。</p>
+          <p class="tip">Gemini 推荐先用 Flash Lite；Groq 可填写多个 Key，每行一个，遇到限流会自动轮询。Key 和模型选择只保存在本机扩展存储中。</p>
         </fieldset>
         <fieldset class="config-group realtime-config"><legend>实时记录</legend>
           <label>记录表网址<input id="realtimeRecordUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/.../edit"></label>

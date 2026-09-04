@@ -426,14 +426,16 @@ const nzHand = value => {
 // Kinshasa 同时出现在两个刚果下、Littoral 分属贝宁/喀麦隆、kabinda 在两个
 // 省都有）。目标行里本来就没有的层级（有的地区只有国家）跳过核对、自然落
 // 到下一级；群组表里留空的格子视为不一致，不猜。
-const findGroupRow = (groupRows, country, province, city) => {
+const normalizeTransferGroup = value => ['group1', 'group2', 'group3'].includes(value) ? value : 'group1';
+const findGroupRow = (groupRows, country, province, city, transferGroup = 'group1') => {
   const wantedCountry = nzHand(country);
   const wantedProvince = nzHand(province);
   const wantedCity = nzHand(city);
+  const reportGroupIndex = normalizeTransferGroup(transferGroup) === 'group3' ? 8 : 7;
   // 在归一化相等之外再接受“去掉分隔符后相等”：N'Djili ≡ Ndjili ≡ n djili。
   // 两侧都已是词集合规范形，因此这只合并分隔符写法差异，不引入子串猜测。
   const eqNz = (left, right) => left === right || left.replace(/\s+/g, '') === right.replace(/\s+/g, '');
-  const withLinks = row => row[7] || row[8];
+  const withLinks = row => row[reportGroupIndex] || row[9];
   const pick = rows => {
     const verified = rows.filter(row =>
       (!wantedProvince || eqNz(nzHand(row[1]), wantedProvince))
@@ -463,12 +465,14 @@ const handoffIdentity = item => {
 const uniqueHandoffResults = results => [...new Map(results.map(item => [handoffIdentity(item), item])).values()];
 function renderHandoffResults(results, isCurrent = true) {
   const visibleResults = uniqueHandoffResults(results);
+  const reportGroupSources = new Set(visibleResults.map(item => normalizeTransferGroup(item.transferGroup)));
+  const reportGroupColumn = reportGroupSources.size === 1 ? (reportGroupSources.has('group3') ? 'I' : 'H') : 'H/I';
   if (isCurrent) { currentHandoffResults = visibleResults; $('#reportDateFilter').value = ''; }
   displayedHandoffResults = visibleResults;
   $('#reportCount').textContent = visibleResults.length;
   $('#reportStatus').textContent = `${visibleResults.length} 行`;
   $('#reportResults').innerHTML = visibleResults.length
-    ? `<div class="report-row header"><div>行</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="submitter" title="点击修改名称">${escapeHtml(reportLabels.submitter)}</span>（J列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="brebis" title="点击修改名称">${escapeHtml(reportLabels.brebis)}</span>（P列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="numero" title="点击修改名称">${escapeHtml(reportLabels.numero)}</span>（Q列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="reportGroup" title="点击修改名称">${escapeHtml(reportLabels.reportGroup)}</span>（H列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="callGroup" title="点击修改名称">${escapeHtml(reportLabels.callGroup)}</span>（I列）</div><div>匹配来源</div><div>操作</div></div>` + visibleResults.map((item, index) => { const source = item.source || ''; const rowClass = source.startsWith('Y→C') ? '' : (source ? 'coarse' : 'unmatched'); return `<div class="report-row ${rowClass}"><div class="report-cell">${escapeHtml(item.row)}</div><div class="report-cell">${escapeHtml(item.submitter || '—')}</div><div class="report-cell">${escapeHtml(item.brebis || '—')}</div><div class="report-cell">${item.phoneUrl ? `<a href="${escapeHtml(item.phoneUrl)}" target="_blank" rel="noopener">打开 WhatsApp</a>` : '—'}</div><div class="report-cell">${escapeHtml(item.reportGroup || '—')}</div><div class="report-cell">${escapeHtml(item.callGroup || '—')}</div><div class="report-cell match-source">${escapeHtml(source || '未匹配')}</div><div class="report-cell report-actions"><button class="copy-report icon-button secondary" data-report-index="${index}" aria-label="复制本条" title="复制本条">${copyIcon}</button><button class="refresh-match icon-button secondary" data-report-index="${index}" aria-label="重新匹配" title="重新匹配">${refreshIcon}</button></div></div>`; }).join('')
+    ? `<div class="report-row header"><div>行</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="submitter" title="点击修改名称">${escapeHtml(reportLabels.submitter)}</span>（J列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="brebis" title="点击修改名称">${escapeHtml(reportLabels.brebis)}</span>（P列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="numero" title="点击修改名称">${escapeHtml(reportLabels.numero)}</span>（Q列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="reportGroup" title="点击修改名称">${escapeHtml(reportLabels.reportGroup)}</span>（${reportGroupColumn}列）</div><div><span class="editable-report-label" contenteditable="true" spellcheck="false" data-report-label="callGroup" title="点击修改名称">${escapeHtml(reportLabels.callGroup)}</span>（J列）</div><div>匹配来源</div><div>操作</div></div>` + visibleResults.map((item, index) => { const source = item.source || ''; const rowClass = source.startsWith('Y→C') ? '' : (source ? 'coarse' : 'unmatched'); return `<div class="report-row ${rowClass}"><div class="report-cell">${escapeHtml(item.row)}</div><div class="report-cell">${escapeHtml(item.submitter || '—')}</div><div class="report-cell">${escapeHtml(item.brebis || '—')}</div><div class="report-cell">${item.phoneUrl ? `<a href="${escapeHtml(item.phoneUrl)}" target="_blank" rel="noopener">打开 WhatsApp</a>` : '—'}</div><div class="report-cell">${escapeHtml(item.reportGroup || '—')}</div><div class="report-cell">${escapeHtml(item.callGroup || '—')}</div><div class="report-cell match-source">${escapeHtml(source || '未匹配')}</div><div class="report-cell report-actions"><button class="copy-report icon-button secondary" data-report-index="${index}" aria-label="复制本条" title="复制本条">${copyIcon}</button><button class="refresh-match icon-button secondary" data-report-index="${index}" aria-label="重新匹配" title="重新匹配">${refreshIcon}</button></div></div>`; }).join('')
     : '<div class="empty-report">该日期没有交接报告记录。</div>';
 }
 const cleanCopyValue = value => String(value ?? '').replace(/\s*\r?\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim();
@@ -500,7 +504,7 @@ async function refreshHandoffMatch(item) {
   // J1:Y 一次读齐（下标：J=0 … P=6 Q=7 … W=13 X=14 Y=15）。
   const [targetBlock, groups] = await Promise.all([
     readValues(token, base, `${target}!J1:Y`),
-    readRowsWithHyperlinks(token, base, `${lookup}!A:I`)
+    readRowsWithHyperlinks(token, base, `${lookup}!A:J`)
   ]);
   const rows = targetBlock.values || [];
   const wantedDigits = String(item.phoneUrl || '').replace(/\D/g, '');
@@ -510,8 +514,9 @@ async function refreshHandoffMatch(item) {
   }
   if (hitIndex < 0) throw new Error('目标分表 Q 列里没有找到这个号码——人员可能已被删除或改号。');
   const row = rows[hitIndex] || [];
-  const { found, source } = findGroupRow(groups, row[13] || '', row[14] || '', row[15] || '');
-  return { ...item, row: hitIndex + 1, submitter: row[0] || '', reportGroup: found?.[7] || '', callGroup: found?.[8] || '', source };
+  const transferGroup = normalizeTransferGroup(item.transferGroup);
+  const { found, source } = findGroupRow(groups, row[13] || '', row[14] || '', row[15] || '', transferGroup);
+  return { ...item, transferGroup, row: hitIndex + 1, submitter: row[0] || '', reportGroup: found?.[transferGroup === 'group3' ? 8 : 7] || '', callGroup: found?.[9] || '', source };
 }
 async function refreshAllReportMatches() {
   const items = displayedHandoffResults.slice();
@@ -603,7 +608,7 @@ async function rebuildReportsFromTarget() {
     const lookup = quoteSheet(config.groupTab);
     const [targetData, groups] = await Promise.all([
       readValues(token, base, target + '!C3:Y'),
-      readRowsWithHyperlinks(token, base, lookup + '!A:I')
+      readRowsWithHyperlinks(token, base, lookup + '!A:J')
     ]);
     const rows = targetData.values || [];
     const groupRows = groups;
@@ -616,16 +621,18 @@ async function rebuildReportsFromTarget() {
       const hasRecord = [row[13], row[14], row[20], row[21], row[22]]
         .some(value => String(value ?? '').trim() !== '');
       if (!hasRecord) continue;
-      const { found, source } = findGroupRow(groupRows, row[20] || '', row[21] || '', row[22] || '');
+      const transferGroup = normalizeTransferGroup(config.transferGroup);
+      const { found, source } = findGroupRow(groupRows, row[20] || '', row[21] || '', row[22] || '', transferGroup);
       results.push({
         row: sheetRow,
         historyScope: makeHistoryScope(parseSpreadsheetId(config.targetUrl), config.targetTab),
+        transferGroup,
         dateKey,
         brebis: row[13] || '',
         submitter: row[7] || '',
         phoneUrl: normalizePhoneUrl(row[14] || ''),
-        reportGroup: found?.[7] || '',
-        callGroup: found?.[8] || '',
+        reportGroup: found?.[transferGroup === 'group3' ? 8 : 7] || '',
+        callGroup: found?.[9] || '',
         source
       });
     }
@@ -681,7 +688,7 @@ $('#copyAllReports').onclick = async event => {
   }
   catch { button.textContent = '复制失败'; setTimeout(() => { button.textContent = '复制全部'; }, 1200); }
 };
-async function buildHandoffReport(token, base, targetTab, groupTab, startRow, rowCount, historyScope = '') {
+async function buildHandoffReport(token, base, targetTab, groupTab, startRow, rowCount, historyScope = '', transferGroup = 'group1') {
   if (!groupTab) throw new Error('尚未填写群组配置分表名称。');
   const target = quoteSheet(targetTab || 'Sheet1');
   const lookup = quoteSheet(groupTab);
@@ -691,14 +698,14 @@ async function buildHandoffReport(token, base, targetTab, groupTab, startRow, ro
     readValues(token, base, `${target}!Q${startRow}:Q${startRow + rowCount - 1}`),
     readValues(token, base, `${target}!C${startRow}:C${startRow + rowCount - 1}`),
     readValues(token, base, `${target}!J${startRow}:J${startRow + rowCount - 1}`),
-    readRowsWithHyperlinks(token, base, `${lookup}!A:I`)
+    readRowsWithHyperlinks(token, base, `${lookup}!A:J`)
   ]);
   const locations = location.values || []; const brebisValues = brebis.values || []; const phoneValues = phone.values || []; const dateValues = dates.values || []; const submitterValues = submitters.values || []; const groupRows = groups;
   const results = [];
   for (let index = 0; index < rowCount; index++) {
     const row = locations[index] || [];
-    const { found, source } = findGroupRow(groupRows, row[0], row[1], row[2]);
-    results.push({ row: startRow + index, historyScope, dateKey: normalizeReportDate(dateValues[index]?.[0]), brebis: brebisValues[index]?.[0] || '', submitter: submitterValues[index]?.[0] || '', phoneUrl: normalizePhoneUrl(phoneValues[index]?.[0]), reportGroup: found?.[7] || '', callGroup: found?.[8] || '', source });
+    const { found, source } = findGroupRow(groupRows, row[0], row[1], row[2], transferGroup);
+    results.push({ row: startRow + index, historyScope, transferGroup: normalizeTransferGroup(transferGroup), dateKey: normalizeReportDate(dateValues[index]?.[0]), brebis: brebisValues[index]?.[0] || '', submitter: submitterValues[index]?.[0] || '', phoneUrl: normalizePhoneUrl(phoneValues[index]?.[0]), reportGroup: found?.[normalizeTransferGroup(transferGroup) === 'group3' ? 8 : 7] || '', callGroup: found?.[9] || '', source });
   }
   const undatedCount = results.filter(item => !item.dateKey).length;
   if (undatedCount) log(`有 ${undatedCount} 行交接报告没有可识别的报告日期（目标表 C 列为空或日期写法不认识），已归入“${UNDATED_KEY}”分组。`);
@@ -841,10 +848,18 @@ const matchCountry = (value, options) => {
 };
 const showRegionCacheStatus = (message, color = '#188038') => { const node = $('#regionCacheStatus'); if (node) { node.textContent = message; node.style.color = color; } };
 const cacheTime = timestamp => timestamp ? new Date(timestamp).toLocaleString() : '未知时间';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+const GEMINI_MODEL_IDS = new Set([
+  'gemini-3.5-flash-lite', 'gemini-3.1-flash-lite',
+  'gemini-2.5-flash-lite', 'gemini-3.5-flash',
+  'gemma-4-26b-a4b-it', 'gemma-4-31b-it'
+]);
+const normalizeGeminiModel = model => GEMINI_MODEL_IDS.has(model) ? model : DEFAULT_GEMINI_MODEL;
 const updateLlmKeyLabel = () => {
   const gemini = $('#llmProvider').value === 'gemini';
   $('#llmKeyLabel').firstChild.nodeValue = gemini ? 'Gemini API Key' : 'Groq API Keys（每行一个）';
   $('#llmKey').placeholder = gemini ? 'AQ... 或 AIza...' : 'gsk_...';
+  $('#llmModelLabel').hidden = !gemini;
 };
 let activeLlmProvider = 'groq';
 $('#llmProvider').onchange = async () => {
@@ -871,6 +886,7 @@ $('#toggleLlmKey').onclick = () => {
   button.title = visible ? '隐藏 API Key' : '显示 API Key';
 };
 updateLlmKeyLabel();
+$('#llmModel').onchange = () => extensionStorage.local.set({ llmModel: normalizeGeminiModel($('#llmModel').value) });
 
 // Cheap content fingerprint for change detection (not cryptographic).
 const regionRowsHash = rows => {
@@ -1128,14 +1144,17 @@ async function callGroqWithRotation(apiKeys, systemPrompt, userText, strictHint 
   throw lastError || new Error('没有可用的 Groq API Key。');
 }
 
-async function callGemini(apiKey, systemPrompt, userText, strictHint = false) {
-  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent', {
+async function callGemini(apiKey, model, systemPrompt, userText, strictHint = false) {
+  const isGemma = model.startsWith('gemma-');
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: systemPrompt }] },
       contents: [{ role: 'user', parts: [{ text: `${userText}${strictHint ? STRICT_JSON_REMINDER : ''}` }] }],
-      generationConfig: { responseMimeType: 'application/json' }
+      generationConfig: isGemma
+        ? { thinkingConfig: { thinkingLevel: 'minimal' } }
+        : { responseMimeType: 'application/json' }
     })
   });
   if (!response.ok) throw new Error(`Gemini API ${response.status}: ${(await response.text()).slice(0, 300)}`);
@@ -1144,27 +1163,35 @@ async function callGemini(apiKey, systemPrompt, userText, strictHint = false) {
   return parseModelJson(content, 'Gemini');
 }
 
-const callLlm = (provider, apiKeys, systemPrompt, userText, strictHint = false) => provider === 'gemini' ? callGemini(apiKeys[0], systemPrompt, userText, strictHint) : callGroqWithRotation(apiKeys, systemPrompt, userText, strictHint);
+const callLlm = (provider, apiKeys, systemPrompt, userText, strictHint = false, model = DEFAULT_GEMINI_MODEL) => provider === 'gemini' ? callGemini(apiKeys[0], normalizeGeminiModel(model), systemPrompt, userText, strictHint) : callGroqWithRotation(apiKeys, systemPrompt, userText, strictHint);
 // 模型偶尔会在 JSON 外夹带说明文字导致解析失败：只有这类"格式失败"才值得
 // 原样附加严格格式要求重试一次；网络/限流/鉴权错误直接抛给上层处理。
-async function callLlmWithRetry(provider, apiKeys, systemPrompt, userText) {
+async function callLlmWithRetry(provider, apiKeys, systemPrompt, userText, model = DEFAULT_GEMINI_MODEL) {
+  const label = provider === 'gemini' ? model : provider;
+  const startedAt = performance.now();
   try {
-    return await callLlm(provider, apiKeys, systemPrompt, userText);
+    const result = await callLlm(provider, apiKeys, systemPrompt, userText, false, model);
+    log(`${label} 模型请求完成，用时 ${formatDuration(performance.now() - startedAt)}。`);
+    return result;
   } catch (error) {
-    if (!/json/i.test(String(error?.message || error))) throw error;
+    if (!/json/i.test(String(error?.message || error))) {
+      log(`${label} 模型请求失败，用时 ${formatDuration(performance.now() - startedAt)}。`, 'error');
+      throw error;
+    }
     log(`${provider} 第一次返回不是合法 JSON，已附加严格格式要求重试一次。`);
-    return await callLlm(provider, apiKeys, systemPrompt, userText, true);
+    const retryStartedAt = performance.now();
+    const result = await callLlm(provider, apiKeys, systemPrompt, userText, true, model);
+    log(`${label} 严格 JSON 重试完成，用时 ${formatDuration(performance.now() - retryStartedAt)}。`);
+    return result;
   }
 }
 
 const rememberDashboardView = view => { void extensionStorage.local.set({ dashboardActiveView: view }); };
 $('#workflowTab').onclick = () => { rememberDashboardView('workflow'); $('#workflowTab').classList.add('active'); $('#reportTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#realtimeTab').classList.remove('active'); $('#workflowView').hidden = false; $('#reportView').hidden = true; $('#configView').hidden = true; $('#deepView').hidden = true; $('#realtimeView').hidden = true; };
 $('#reportTab').onclick = () => {
-  const entering = $('#reportView').hidden;
   rememberDashboardView('report');
   $('#reportTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#realtimeTab').classList.remove('active');
   $('#workflowView').hidden = true; $('#reportView').hidden = false; $('#configView').hidden = true; $('#deepView').hidden = true; $('#realtimeView').hidden = true;
-  if (entering && displayedHandoffResults.length) void refreshAllReportMatches();
 };
 $('#configTab').onclick = () => { rememberDashboardView('config'); $('#configTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#reportTab').classList.remove('active'); $('#deepTab').classList.remove('active'); $('#realtimeTab').classList.remove('active'); $('#workflowView').hidden = true; $('#reportView').hidden = true; $('#configView').hidden = false; $('#deepView').hidden = true; $('#realtimeView').hidden = true; };
 $('#deepTab').onclick = () => { rememberDashboardView('deep'); $('#deepTab').classList.add('active'); $('#workflowTab').classList.remove('active'); $('#reportTab').classList.remove('active'); $('#realtimeTab').classList.remove('active'); $('#configTab').classList.remove('active'); $('#workflowView').hidden = true; $('#reportView').hidden = true; $('#configView').hidden = true; $('#deepView').hidden = false; $('#realtimeView').hidden = true; };
@@ -1274,7 +1301,7 @@ $('#deepSearch').onclick = async () => {
     queryNumbers = [...new Set(queryNumbers.flatMap(token => splitDeepQueryToken(token, knownPhones)))];
     // 跟进人员/所属群组/群组表格 和三个时段群组一样，全部取自群组配置分表
     // 中按地址匹配到的那一行：E列=跟进人员，F列=所属群组，G列=所属群组的
-    // 表格链接（A:O 下标：E=4 F=5 G=6，J=9 L=11 O=14）。目标分表只负责用
+    // 表格链接（A:O 下标：E=4 F=5 G=6，K=10 M=12 P=15）。目标分表只负责用
     // Q 列手机号定位人员和提供 W/X/Y 地址。整表只读一次，多个号码共用。
     const buildItem = (index, queryDigits) => {
       const row = rows[index] || [];
@@ -1286,7 +1313,7 @@ $('#deepSearch').onclick = async () => {
         matchSource = source;
         if (found) {
           followUp = found[4] || ''; ownerGroup = found[5] || ''; ownerGroupLink = found[6] || '';
-          g1300 = found[9] || ''; g1800 = found[11] || ''; g2130 = found[14] || '';
+          g1300 = found[10] || ''; g1800 = found[12] || ''; g2130 = found[15] || '';
           statusKind = source === 'Y→C' ? 'matched' : 'partial';
         }
       } else if (!lookup) statusKind = 'missing-config';
@@ -1517,7 +1544,7 @@ $('#reportDateFilter').onchange = async () => {
 };
 extensionStorage.local.get({ handoffHistory: {} }).then(({ handoffHistory }) => populateReportDates(handoffHistory));
 
-async function analyzeReports(token, base, sheetTitle, regionRows, provider, apiKey, startRow, rowCount, onlyRows = null, regionTab = '', dropdownSeed = null) {
+async function analyzeReports(token, base, sheetTitle, regionRows, provider, apiKey, startRow, rowCount, onlyRows = null, regionTab = '', dropdownSeed = null, model = DEFAULT_GEMINI_MODEL) {
   const sheet = quoteSheet(sheetTitle);
   const endRow = startRow + rowCount - 1;
   const [reportResponse, existingResponse, dropdownResponse, categoryOptions] = await Promise.all([
@@ -1543,7 +1570,7 @@ async function analyzeReports(token, base, sheetTitle, regionRows, provider, api
     if (!report) { log(`第 ${startRow + index} 行 AL 列为空，跳过。`); continue; }
     let parsed;
     try {
-      parsed = await callLlmWithRetry(provider, apiKey, `${LLM_SYSTEM_PROMPT} ${MULTILINGUAL_REPORT_HINT}`, `请从下面报告提取并推断字段：\n${report}`);
+      parsed = await callLlmWithRetry(provider, apiKey, `${LLM_SYSTEM_PROMPT} ${MULTILINGUAL_REPORT_HINT}`, `请从下面报告提取并推断字段：\n${report}`, model);
     } catch (error) {
       // One bad report or a rate-limited model must not kill the whole run:
       // skip the row and keep going, the rest of the flow still applies.
@@ -1685,7 +1712,7 @@ async function analyzeReports(token, base, sheetTitle, regionRows, provider, api
       const localities = allPlaceHints;
       if (localities.length) {
         try {
-          const inferParsed = await callLlmWithRetry(provider, apiKey, GEO_INFER_SYSTEM_PROMPT, JSON.stringify({ country, provinces: provinceOptions, places: localities }));
+          const inferParsed = await callLlmWithRetry(provider, apiKey, GEO_INFER_SYSTEM_PROMPT, JSON.stringify({ country, provinces: provinceOptions, places: localities }), model);
           const results = Array.isArray(inferParsed?.results) ? inferParsed.results : [];
           for (const item of results) {
             const guess = matchRegion(item?.province || '', provinceOptions);
@@ -1713,7 +1740,7 @@ async function analyzeReports(token, base, sheetTitle, regionRows, provider, api
       const localities = allPlaceHints;
       if (nearbyPool.length && localities.length) {
         try {
-          const nearParsed = await callLlmWithRetry(provider, apiKey, NEARBY_INFER_SYSTEM_PROMPT, JSON.stringify({ country, province, places: localities, localities: nearbyPool }));
+          const nearParsed = await callLlmWithRetry(provider, apiKey, NEARBY_INFER_SYSTEM_PROMPT, JSON.stringify({ country, province, places: localities, localities: nearbyPool }), model);
           const guess = matchRegion(nearParsed?.commune || '', nearbyPool);
           if (guess) {
             addressRow = matchedProvinceRows.find(row => normalize(row[2]) === normalize(guess)) || null;
@@ -2000,13 +2027,14 @@ async function transferWithSheetsApi(text, token, targetUrl, targetTab, statusTe
 extensionStorage.sync.get({ targetUrl: '', targetTab: '', statusText: '', aDateValue: '', personnelId: '', groupTab: '', transferGroup: 'group1', realtimeRecordUrl: '', realtimeRecordTab: '' }).then(async values => {
   const groupTab = values.groupTab || '';
   const personnelId = values.personnelId || '';
-  $('#targetUrl').value = values.targetUrl; $('#targetTab').value = values.targetTab; $('#statusText').value = values.statusText; $('#aDateValue').value = values.aDateValue; $('#personnelId').value = personnelId; $('#groupTab').value = groupTab; $('#transferGroup').value = values.transferGroup === 'group2' ? 'group2' : 'group1'; $('#realtimeRecordUrl').value = values.realtimeRecordUrl || ''; $('#realtimeRecordTab').value = values.realtimeRecordTab || '';
+  $('#targetUrl').value = values.targetUrl; $('#targetTab').value = values.targetTab; $('#statusText').value = values.statusText; $('#aDateValue').value = values.aDateValue; $('#personnelId').value = personnelId; $('#groupTab').value = groupTab; $('#transferGroup').value = normalizeTransferGroup(values.transferGroup); $('#realtimeRecordUrl').value = values.realtimeRecordUrl || ''; $('#realtimeRecordTab').value = values.realtimeRecordTab || '';
   updateTransferGroupVisual();
 });
-extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', regionTab: '', regionConfigCache: null, googleApiConnectedAt: 0 }).then(values => {
+extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', llmModel: 'gemini-3.5-flash-lite', regionTab: '', regionConfigCache: null, googleApiConnectedAt: 0 }).then(values => {
   const groqApiKeys = values.groqApiKeys?.length ? values.groqApiKeys : (values.groqApiKey ? [values.groqApiKey] : []);
-  $('#llmProvider').value = values.llmProvider; $('#llmKey').value = values.llmProvider === 'gemini' ? values.geminiApiKey : groqApiKeys.join('\n'); $('#regionTab').value = values.regionTab;
+  $('#llmProvider').value = values.llmProvider; $('#llmModel').value = normalizeGeminiModel(values.llmModel); $('#llmKey').value = values.llmProvider === 'gemini' ? values.geminiApiKey : groqApiKeys.join('\n'); $('#regionTab').value = values.regionTab;
   activeLlmProvider = values.llmProvider === 'gemini' ? 'gemini' : 'groq';
+  updateLlmKeyLabel();
   if (values.googleApiConnectedAt) {
     $('#connectionDot').parentElement.classList.add('ok');
     $('#connectionText').textContent = `Google API 已授权（${cacheTime(values.googleApiConnectedAt)}）`;
@@ -2053,7 +2081,7 @@ $('#save').onclick = async () => {
   const transferGroup = $('#transferGroup').value;
   const targetUrl = $('#targetUrl').value.trim(); const targetTab = $('#targetTab').value.trim(); const statusText = $('#statusText').value.trim(); const aDateValue = $('#aDateValue').value; const groupTab = $('#groupTab').value.trim(); const realtimeRecordUrl = $('#realtimeRecordUrl').value.trim(); const realtimeRecordTab = $('#realtimeRecordTab').value.trim();
   const personnelId = $('#personnelId').value.trim();
-  const llmProvider = $('#llmProvider').value; const llmKeys = $('#llmKey').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
+  const llmProvider = $('#llmProvider').value; const llmModel = $('#llmModel').value; const llmKeys = $('#llmKey').value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
   const regionTab = $('#regionTab').value.trim();
   // Validate everything before writing anything: a failed save used to leave
   // half-old/half-new configuration behind.
@@ -2067,12 +2095,12 @@ $('#save').onclick = async () => {
   if (realtimeRecordUrl && !realtimeRecordTab) { $('#saveStatus').textContent = '请填写实时记录表分表名称'; $('#saveStatus').style.color = '#c5221f'; return; }
   if (realtimeRecordTab && !realtimeRecordUrl) { $('#saveStatus').textContent = '请填写实时记录表网址'; $('#saveStatus').style.color = '#c5221f'; return; }
   await extensionStorage.sync.set({ targetUrl, targetTab, statusText, aDateValue, personnelId, groupTab, transferGroup, realtimeRecordUrl, realtimeRecordTab });
-  await extensionStorage.local.set({ groqApiKey: llmProvider === 'groq' ? llmKeys[0] : '', groqApiKeys: llmProvider === 'groq' ? llmKeys : [], geminiApiKey: llmProvider === 'gemini' ? llmKeys[0] : '', llmProvider, regionTab });
+  await extensionStorage.local.set({ groqApiKey: llmProvider === 'groq' ? llmKeys[0] : '', groqApiKeys: llmProvider === 'groq' ? llmKeys : [], geminiApiKey: llmProvider === 'gemini' ? llmKeys[0] : '', llmProvider, llmModel, regionTab });
   $('#saveStatus').textContent = '配置已保存'; $('#saveStatus').style.color = '#188038'; log(`目标位置已保存：${targetTab || '默认分表'}`, 'success');
 };
 
 const syncConfigKeys = ['targetUrl', 'targetTab', 'statusText', 'aDateValue', 'personnelId', 'groupTab', 'transferGroup', 'realtimeRecordUrl', 'realtimeRecordTab'];
-const localConfigKeys = ['groqApiKey', 'groqApiKeys', 'geminiApiKey', 'llmProvider', 'regionTab', 'reportLabels'];
+const localConfigKeys = ['groqApiKey', 'groqApiKeys', 'geminiApiKey', 'llmProvider', 'llmModel', 'regionTab', 'reportLabels'];
 $('#exportConfig').onclick = async () => {
   const syncValues = await extensionStorage.sync.get(syncConfigKeys);
   const localValues = await extensionStorage.local.get(localConfigKeys);
@@ -2113,7 +2141,7 @@ $('#start').onclick = async () => {
     await openAppNotice(message);
     return;
   }
-  const transferGroup = $('#transferGroup').value === 'group2' ? 'group2' : 'group1';
+  const transferGroup = normalizeTransferGroup($('#transferGroup').value);
   let previewValues;
   try { previewValues = parseTransferValues(formTransferSource.text, transferGroup); }
   catch (error) { log(error.message || String(error), 'error'); await openAppNotice(error.message || String(error)); return; }
@@ -2154,7 +2182,8 @@ $('#start').onclick = async () => {
       $('#connectionDot').parentElement.classList.add('ok'); $('#connectionText').textContent = 'Google API 已授权'; log('Google 授权成功。', 'success');
       setStep(2, 2); log('正在读取目标分表 C:BM，查找最后一条数据。');
       const result = await transferWithSheetsApi(text, token, $('#targetUrl').value.trim(), $('#targetTab').value.trim(), $('#statusText').value.trim(), $('#aDateValue').value, $('#personnelId').value.trim(), startColumnChoice, transferGroup);
-      const { groqApiKey, groqApiKeys = [], geminiApiKey, llmProvider = 'groq', regionTab = '' } = await extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', regionTab: '' });
+      const { groqApiKey, groqApiKeys = [], geminiApiKey, llmProvider = 'groq', llmModel: savedLlmModel = DEFAULT_GEMINI_MODEL, regionTab = '' } = await extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', llmModel: DEFAULT_GEMINI_MODEL, regionTab: '' });
+      const llmModel = normalizeGeminiModel(savedLlmModel);
       const llmKeys = llmProvider === 'gemini' ? [geminiApiKey].filter(Boolean) : (groqApiKeys.length ? groqApiKeys : [groqApiKey].filter(Boolean));
       if (!llmKeys.length) throw new Error(`尚未配置 ${llmProvider === 'gemini' ? 'Gemini' : 'Groq'} API Key，请在右侧配置后重试。`);
       const apiBase = `https://sheets.googleapis.com/v4/spreadsheets/${parseSpreadsheetId($('#targetUrl').value.trim())}`;
@@ -2165,8 +2194,8 @@ $('#start').onclick = async () => {
       const phoneResult = await fillPhoneCountries(token, apiBase, $('#targetTab').value.trim() || 'Sheet1', regionRows, result.startRow, result.rowCount);
       const phoneFilled = phoneResult.count;
       log(`Q 列区号处理完成，补全 V 列 ${phoneFilled} 个空单元格。`, 'success');
-      setStep(10, 10); log(`正在逐行调用 ${llmProvider === 'gemini' ? 'Gemini' : 'Groq'} 拆解 AL${result.startRow}:AL${result.startRow + result.rowCount - 1}。`);
-      const analysis = await analyzeReports(token, apiBase, $('#targetTab').value.trim() || 'Sheet1', regionRows, llmProvider, llmKeys, result.startRow, result.rowCount, null, regionTab, phoneResult.dropdown);
+      setStep(10, 10); log(`正在逐行调用 ${llmProvider === 'gemini' ? `Gemini（${llmModel}）` : 'Groq'} 拆解 AL${result.startRow}:AL${result.startRow + result.rowCount - 1}。`);
+      const analysis = await analyzeReports(token, apiBase, $('#targetTab').value.trim() || 'Sheet1', regionRows, llmProvider, llmKeys, result.startRow, result.rowCount, null, regionTab, phoneResult.dropdown, llmModel);
       setStep(11, 11); log(`报告拆解完成：分析 ${analysis.analyzed} 行，回写 ${analysis.updated} 个字段${analysis.failedRows.length ? `；失败 ${analysis.failedRows.length} 行（第 ${analysis.failedRows.join('、')} 行），其余步骤继续` : ''}。`, analysis.failedRows.length ? 'error' : 'success');
       // 失败行入队：流程控制页的“重跑上次失败行”按钮只处理这些行，不整批重跑。
       await extensionStorage.local.set({ llmRetryQueue: analysis.failedRows.length ? { rows: analysis.failedRows, savedAt: Date.now() } : null });
@@ -2174,7 +2203,7 @@ $('#start').onclick = async () => {
       setStep(12, 12); log('正在生成交接报告：按 Y→X→W 查找地区划分。');
       const targetSheet = $('#targetTab').value.trim() || 'Sheet1';
       const historyScope = makeHistoryScope(parseSpreadsheetId($('#targetUrl').value.trim()), targetSheet);
-      const handoffResults = await buildHandoffReport(token, apiBase, targetSheet, $('#groupTab').value.trim(), result.startRow, result.rowCount, historyScope);
+      const handoffResults = await buildHandoffReport(token, apiBase, targetSheet, $('#groupTab').value.trim(), result.startRow, result.rowCount, historyScope, transferGroup);
       log(`交接报告生成完成，共 ${handoffResults.length} 行。`, 'success');
       return { result, phoneFilled, analysis, handoffResults };
     });
@@ -2213,7 +2242,7 @@ const updateRetryFailedButton = rows => {
 extensionStorage.local.get({ llmRetryQueue: null }).then(({ llmRetryQueue }) => updateRetryFailedButton(llmRetryQueue?.rows));
 const updateTransferGroupVisual = () => {
   const select = $('#transferGroup');
-  select.classList.toggle('source-africa', select.value === 'group1');
+  select.classList.toggle('source-africa', select.value === 'group1' || select.value === 'group3');
   select.classList.toggle('source-europe', select.value === 'group2');
   const banner = $('#heroBanner');
   if (banner) banner.src = select.value === 'group2' ? 'assets/team-france-banner.png' : 'assets/team-africa-banner.png';
@@ -2236,18 +2265,19 @@ $('#retryFailedRows').onclick = async () => {
     const { regionTab = '' } = await extensionStorage.local.get({ regionTab: '' });
     log(`正在同步地区配置分表“${regionTab}”…`);
     const regionRows = await syncRegionConfig(token, base, regionTab);
-    const { groqApiKey, groqApiKeys = [], geminiApiKey, llmProvider = 'groq' } = await extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq' });
+    const { groqApiKey, groqApiKeys = [], geminiApiKey, llmProvider = 'groq', llmModel: savedLlmModel = DEFAULT_GEMINI_MODEL } = await extensionStorage.local.get({ groqApiKey: '', groqApiKeys: [], geminiApiKey: '', llmProvider: 'groq', llmModel: DEFAULT_GEMINI_MODEL });
+    const llmModel = normalizeGeminiModel(savedLlmModel);
     const llmKeys = llmProvider === 'gemini' ? [geminiApiKey].filter(Boolean) : (groqApiKeys.length ? groqApiKeys : [groqApiKey].filter(Boolean));
     if (!llmKeys.length) throw new Error(`尚未配置 ${llmProvider === 'gemini' ? 'Gemini' : 'Groq'} API Key。`);
     const spanStart = rows[0];
     const spanEnd = rows[rows.length - 1];
     log(`开始重跑 ${rows.length} 个失败行：第 ${rows.join('、')} 行，逐行调用 ${llmProvider === 'gemini' ? 'Gemini' : 'Groq'}…`);
-    const analysis = await analyzeReports(token, base, targetTab, regionRows, llmProvider, llmKeys, spanStart, spanEnd - spanStart + 1, new Set(rows), regionTab);
+    const analysis = await analyzeReports(token, base, targetTab, regionRows, llmProvider, llmKeys, spanStart, spanEnd - spanStart + 1, new Set(rows), regionTab, null, llmModel);
     log(`重跑完成：成功 ${analysis.analyzed} 行，回写 ${analysis.updated} 个字段${analysis.failedRows.length ? `；仍失败 ${analysis.failedRows.length} 行（第 ${analysis.failedRows.join('、')} 行）` : ''}。`, analysis.failedRows.length ? 'error' : 'success');
     // 地址补上后刷新这些行所属区间的交接报告；历史按行取最新，不会重复。
     if (analysis.analyzed) {
       const historyScope = makeHistoryScope(parseSpreadsheetId(targetUrl), targetTab);
-      const handoffResults = await buildHandoffReport(token, base, targetTab, $('#groupTab').value.trim(), spanStart, spanEnd - spanStart + 1, historyScope);
+      const handoffResults = await buildHandoffReport(token, base, targetTab, $('#groupTab').value.trim(), spanStart, spanEnd - spanStart + 1, historyScope, normalizeTransferGroup($('#transferGroup').value));
       log(`交接报告已刷新，区间内共 ${handoffResults.length} 条。`);
       $('#reportTab').click();
     }
